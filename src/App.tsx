@@ -7,7 +7,8 @@ import {
 import type { Session } from '@supabase/supabase-js';
 import { INDUSTRIES, makeCompany, validateCompanyName } from './lib/company';
 import { createAuditEvent, emptyWorkspace, readDemoWorkspace, writeDemoWorkspace } from './lib/workspace';
-import { getSupabaseSetupMessage, isSupabaseConfigured, supabase } from './lib/supabase';
+import { isSupabaseConfigured, supabase } from './lib/supabase';
+import { puterChat } from './lib/puter';
 import type { AppUser, Company, WorkspaceData } from './types';
 
 type Page = 'Overview' | 'Companies' | 'Employees' | 'Departments' | 'Projects' | 'Operations' | 'Knowledge' | 'Approvals' | 'Analytics' | 'Integrations' | 'Settings';
@@ -54,6 +55,8 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState('');
   const [authError, setAuthError] = useState('');
   const [dataError, setDataError] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState('');
   const [settingsName, setSettingsName] = useState('');
 
   const activeCompany = useMemo(
@@ -163,11 +166,10 @@ export default function App() {
         setFormError('Sign in before creating a company.');
         return;
       }
-      const { data, error } = await supabase.from('companies').insert({
-        name: company.name,
-        industry: company.industry,
-        description: company.description,
-        created_by: user.id,
+      const { data, error } = await supabase.rpc('create_company_workspace', {
+        company_name: company.name,
+        company_industry: company.industry,
+        company_description: company.description,
       }).select('id,name,industry,description,created_at,updated_at').single();
       if (error) { setFormError(error.message); return; }
       const saved: Company = {
@@ -189,6 +191,32 @@ export default function App() {
     setCreateOpen(false);
     setCompanyName(''); setDescription('');
     setPage('Overview');
+  }
+
+  async function generateDescription() {
+    if (companyName.trim().length < 2) {
+      setAiError('Enter a company name first.');
+      return;
+    }
+    setAiBusy(true);
+    setAiError('');
+    try {
+      const response = await puterChat(
+        `Write a concise, professional company description in 1–2 sentences. Company name: ${companyName.trim()}. Industry: ${industry}. Return only the description, no quotation marks or headings.`,
+        { model: 'gpt-5.4-nano' },
+      );
+      const content = typeof response === 'string'
+        ? response
+        : (response as { message?: { content?: unknown } })?.message?.content;
+      if (typeof content !== 'string' || !content.trim()) {
+        throw new Error('The AI returned an empty description. Please try again.');
+      }
+      setDescription(content.trim().slice(0, 500));
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'Could not generate a description with Puter.');
+    } finally {
+      setAiBusy(false);
+    }
   }
 
   async function saveCompanySettings(event: React.FormEvent<HTMLFormElement>) {
@@ -328,7 +356,7 @@ export default function App() {
         </div>
       </main>
 
-      {createOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreateOpen(false); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="modal-header"><div><p className="eyebrow">NEW WORKSPACE</p><h2 id="create-title">Create a company</h2><p className="muted">Start with the basics. You can expand the company later.</p></div><button className="icon-button" aria-label="Close dialog" onClick={() => setCreateOpen(false)}><X size={18} /></button></div><form className="stack-form" onSubmit={submitCompany}><label>Company name <span className="required">*</span><input autoFocus value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="e.g. Northstar Studio" maxLength={80} required /></label><label>Industry<select value={industry} onChange={(e) => setIndustry(e.target.value)}>{INDUSTRIES.map((option) => <option key={option}>{option}</option>)}</select></label><label>Description <span className="muted optional">(optional)</span><textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What will this company work on?" rows={3} maxLength={500} /></label>{formError && <p className="form-error" role="alert">{formError}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setCreateOpen(false)}>Cancel</button><button type="submit" className="primary-button"><Plus size={16} /> Create company</button></div></form></section></div>}
+      {createOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreateOpen(false); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="modal-header"><div><p className="eyebrow">NEW WORKSPACE</p><h2 id="create-title">Create a company</h2><p className="muted">Start with the basics. You can expand the company later.</p></div><button className="icon-button" aria-label="Close dialog" onClick={() => setCreateOpen(false)}><X size={18} /></button></div><form className="stack-form" onSubmit={submitCompany}><label>Company name <span className="required">*</span><input autoFocus value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="e.g. Northstar Studio" maxLength={80} required /></label><label>Industry<select value={industry} onChange={(e) => setIndustry(e.target.value)}>{INDUSTRIES.map((option) => <option key={option}>{option}</option>)}</select></label><div className="description-label-row"><label htmlFor="company-description">Description <span className="muted optional">(optional)</span></label><button type="button" className="ai-draft-button" onClick={generateDescription} disabled={aiBusy}><Sparkles size={13} />{aiBusy ? 'Drafting…' : 'Draft with Puter AI'}</button></div><textarea id="company-description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What will this company work on?" rows={3} maxLength={500} />{aiError && <p className="form-error" role="alert">{aiError}</p>}{formError && <p className="form-error" role="alert">{formError}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setCreateOpen(false)}>Cancel</button><button type="submit" className="primary-button"><Plus size={16} /> Create company</button></div></form></section></div>}
     </div>
   );
 }

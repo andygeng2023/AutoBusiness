@@ -135,5 +135,61 @@ using (public.is_org_member(organisation_id));
 -- restricted until trusted server-side event writing is added.
 revoke insert, update, delete on public.audit_events from anon, authenticated;
 
--- Stage 1 frontend expects organisation_id on companies. Production onboarding
--- must create organisation + owner membership atomically before company CRUD.
+-- Create the organisation, owner membership, company, and initial audit event
+-- in one trusted transaction. The browser never gets direct membership-write access.
+create or replace function public.create_company_workspace(
+  company_name text,
+  company_industry text default 'Other',
+  company_description text default ''
+)
+returns setof public.companies
+language plpgsql
+security definer
+set search_path = ''
+as $
+declare
+  new_org_id uuid;
+  new_company public.companies;
+  current_user_id uuid := auth.uid();
+begin
+  if current_user_id is null then
+    raise exception 'Authentication required' using errcode = '28000';
+  end if;
+  if char_length(trim(company_name)) < 2 or char_length(trim(company_name)) > 80 then
+    raise exception 'Company name must be between 2 and 80 characters' using errcode = '22023';
+  end if;
+  if char_length(coalesce(company_description, '')) > 500 then
+    raise exception 'Company description must be 500 characters or fewer' using errcode = '22023';
+  end if;
+
+  insert into public.organisations (name, created_by)
+  values (trim(company_name), current_user_id)
+  returning id into new_org_id;
+
+  insert into public.organisation_members (organisation_id, user_id, role)
+  values (new_org_id, current_user_id, 'owner');
+
+  insert into public.companies (
+    organisation_id, name, industry, description, created_by
+  ) values (
+    new_org_id,
+    trim(company_name),
+    coalesce(nullif(trim(company_industry), ''), 'Other'),
+    coalesce(trim(company_description), ''),
+    current_user_id
+  )
+  returning * into new_company;
+
+  insert into public.audit_events (
+    organisation_id, company_id, actor_id, action, summary
+  ) values (
+    new_org_id, new_company.id, current_user_id, 'company.created',
+    'Created ' || new_company.name
+  );
+
+  return next new_company;
+end;
+$;
+
+revoke all on function public.create_company_workspace(text, text, text) from public, anon;
+grant execute on function public.create_company_workspace(text, text, text) to authenticated;

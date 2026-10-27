@@ -1,27 +1,18 @@
-/**
- * Puter adapter boundary for the next stage's AI employee runtime.
- * Puter is deliberately not called during Stage 1: creating a workspace
- * should not trigger model usage or incur AI costs.
- */
-export type PuterChatOptions = { model?: string; stream?: boolean };
+import puter from '@heyputer/puter.js';
 
-declare global {
-  interface Window {
-    puter?: {
-      ai: {
-        chat: (prompt: string, options?: PuterChatOptions) => Promise<unknown>;
-      };
-    };
-  }
-}
+export type PuterChatOptions = {
+  model?: string;
+  stream?: boolean;
+};
 
 export function isPuterAvailable(): boolean {
-  return typeof window !== 'undefined' && Boolean(window.puter?.ai?.chat);
+  return typeof window !== 'undefined';
 }
 
+/** Call only in response to an explicit user action; Puter may prompt for sign-in. */
 export async function puterChat(prompt: string, options?: PuterChatOptions): Promise<unknown> {
-  if (!isPuterAvailable()) {
-    throw new Error('Puter.js is not available yet. AI employee execution will be enabled in a later stage.');
+  if (typeof window === 'undefined') {
+    throw new Error('Puter AI is available only in a browser session.');
   }
-  return window.puter!.ai.chat(prompt, options);
+  return puter.ai.chat(prompt, options ?? {});
 }
