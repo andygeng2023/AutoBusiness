@@ -146,7 +146,7 @@ returns setof public.companies
 language plpgsql
 security definer
 set search_path = ''
-as $
+as $$
 declare
   new_org_id uuid;
   new_company public.companies;
@@ -189,7 +189,7 @@ begin
 
   return next new_company;
 end;
-$;
+$$;
 
 revoke all on function public.create_company_workspace(text, text, text) from public, anon;
 grant execute on function public.create_company_workspace(text, text, text) to authenticated;
