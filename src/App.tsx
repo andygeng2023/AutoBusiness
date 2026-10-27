@@ -120,10 +120,6 @@ export default function App() {
     setSettingsName(activeCompany?.name ?? '');
   }, [activeCompany?.id, activeCompany?.name]);
 
-  function addEvent(action: string, summary: string) {
-    const event = createAuditEvent(action, summary);
-    setWorkspace((current) => ({ ...current, events: [event, ...current.events].slice(0, 100) }));
-  }
 
   async function submitAuth(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
