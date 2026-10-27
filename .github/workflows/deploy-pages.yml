@@ -35,8 +35,8 @@ jobs:
       - name: Build
         env:
           VITE_BASE_PATH: /AutoBusiness/
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_URL: https://wctlalaitdrzihvthvze.supabase.co
+          VITE_SUPABASE_ANON_KEY: sb_publishable_tmZZukEnXSWxr6P1m_6IVA_OcIGNNsN
         run: npm run build
       - name: Configure Pages
         uses: actions/configure-pages@v5
