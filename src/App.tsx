@@ -79,6 +79,7 @@ export default function App() {
   const [companyName, setCompanyName] = useState("");
   const [employeeName, setEmployeeName] = useState("");
   const [employeeRole, setEmployeeRole] = useState("");
+  const [newEmployeeDept, setNewEmployeeDept] = useState("leadership");
   const [newChatName, setNewChatName] = useState("");
   const [newChatMembers, setNewChatMembers] = useState<string[]>([]);
   const [toast, setToast] = useState("");
@@ -86,11 +87,11 @@ export default function App() {
   const [activeSettings, setActiveSettings] = useState("General");
 
   useEffect(() => { persist("companies", companies); }, [companies]);
-  useEffect(() => { persist("depts", depts); }, [depts]);
-  useEffect(() => { persist("employees", employees); }, [employees]);
-  useEffect(() => { persist("jobs", jobs); }, [jobs]);
-  useEffect(() => { persist("conversations", conversations); }, [conversations]);
-  useEffect(() => { persist("settings", settings); }, [settings]);
+  useEffect(() => { if (company) persist("depts:" + company.id, depts); }, [company, depts]);
+  useEffect(() => { if (company) persist("employees:" + company.id, employees); }, [company, employees]);
+  useEffect(() => { if (company) persist("jobs:" + company.id, jobs); }, [company, jobs]);
+  useEffect(() => { if (company) persist("conversations:" + company.id, conversations); }, [company, conversations]);
+  useEffect(() => { if (company) persist("settings:" + company.id, settings); }, [company, settings]);
   useEffect(() => { if (toast) { const timer = window.setTimeout(() => setToast(""), 2800); return () => window.clearTimeout(timer); } }, [toast]);
 
   const activeEmployee = employees.find((e) => e.id === selectedEmployee) ?? employees[0];
@@ -106,6 +107,17 @@ export default function App() {
   ];
 
   const notify = (text: string) => setToast(text);
+  const openCompany = (item: Company) => {
+    setCompany(item);
+    setDepts(readStore("depts:" + item.id, seedDepts));
+    setEmployees(readStore("employees:" + item.id, seedEmployees));
+    setJobs(readStore("jobs:" + item.id, seedJobs));
+    setConversations(readStore("conversations:" + item.id, seedConversations));
+    setSettings(readStore("settings:" + item.id, defaultSettings));
+    setSelectedEmployee("maya");
+    setSelectedChat("team");
+    setPage("Dashboard");
+  };
   const changePage = (next: string) => { setPage(next); if (next === "Communication") setSelectedChat("team"); };
   const createJob = (event: FormEvent) => {
     event.preventDefault();
@@ -129,7 +141,8 @@ export default function App() {
         let reply = "";
         if (window.puter?.ai?.chat) {
           const prompt = "You are " + emp.name + ", " + emp.role + " in a company workspace. Tone: " + emp.tone + ". Custom instructions: " + emp.instructions + ". Current task: " + (emp.task || "none") + ". Respond helpfully and concisely to this message: " + text;
-          const result = await window.puter.ai.chat(prompt, { model: emp.model.includes("Claude") ? "claude-sonnet-4" : "gpt-4o-mini" });
+          const model = emp.model.includes("Claude") ? "claude-sonnet-4" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
+          const result = await window.puter.ai.chat(prompt, { model });
           reply = typeof result === "string" ? result : String((result as { message?: { content?: unknown } })?.message?.content ?? "I’ve noted that. I’ll review and get back to you.");
         } else {
           reply = "I’ve received your message. To enable live AI replies, configure Puter.js in this deployment. I can still track jobs and updates here.";
@@ -152,13 +165,13 @@ export default function App() {
   const createCompany = (event: FormEvent) => {
     event.preventDefault(); if (!companyName.trim()) return;
     const name = companyName.trim(); const item = { id: crypto.randomUUID(), name, industry: "New workspace", initials: initials(name), color: "blue", description: "Your new company workspace" };
-    setCompanies((old) => [...old, item]); setCompanyName(""); setShowCompanyForm(false); setCompany(item); setPage("Dashboard");
+    setCompanies((old) => [...old, item]); setCompanyName(""); setShowCompanyForm(false); openCompany(item);
   };
   const createEmployee = (event: FormEvent) => {
     event.preventDefault(); if (!employeeName.trim() || !employeeRole.trim()) return;
     const id = crypto.randomUUID();
-    setEmployees((old) => [...old, { id, name: employeeName.trim(), role: employeeRole.trim(), deptId: depts[0]?.id ?? "leadership", tone: "Clear & concise", model: "GPT-4o mini", instructions: "", status: "Available" }]);
-    setEmployeeName(""); setEmployeeRole(""); setShowEmployeeForm(false); setSelectedEmployee(id); notify("Employee created");
+    setEmployees((old) => [...old, { id, name: employeeName.trim(), role: employeeRole.trim(), deptId: newEmployeeDept || depts[0]?.id || "leadership", tone: "Clear & concise", model: "GPT-4o mini", instructions: "", status: "Available" }]);
+    setEmployeeName(""); setEmployeeRole(""); setNewEmployeeDept("leadership"); setShowEmployeeForm(false); setSelectedEmployee(id); notify("Employee created");
   };
   const createConversation = (event: FormEvent) => {
     event.preventDefault(); if (!newChatName.trim()) return;
@@ -194,7 +207,7 @@ export default function App() {
       <h1>Good work starts<br />with the right team.</h1>
       <p className="home-subtitle">Choose a company workspace to pick up where you left off.</p>
       <div className="company-grid">
-        {companies.map((c) => <button className="company-card" key={c.id} onClick={() => { setCompany(c); setPage("Dashboard"); }}>
+        {companies.map((c) => <button className="company-card" key={c.id} onClick={() => { openCompany(c); }}>
           <div className={"company-icon " + c.color}>{c.initials}</div><div className="company-card-top"><strong>{c.name}</strong><ChevronRight size={17} /></div><span className="company-industry">{c.industry}</span><p>{c.description}</p><div className="company-card-footer"><span><Users size={14} /> {employees.length} employees</span><span className="workspace-open">Open workspace <ArrowUpRight size={14} /></span></div>
         </button>)}
         <button className="company-card add-company" onClick={() => setShowCompanyForm(true)}><span className="add-circle"><Plus size={20} /></span><strong>Create a company</strong><p>Start a new workspace for another business.</p></button>
@@ -271,7 +284,8 @@ export default function App() {
             <button className="primary-button full-button" onClick={() => openChatWith(activeEmployee.id)}><MessageCircle size={16} /> Open conversation</button>
             <button className="secondary-button full-button" onClick={() => { setJobEmployee(activeEmployee.id); setShowJobForm(true); }}><Plus size={15} /> Assign a job</button>
             <div className="detail-divider" /><div className="detail-section-title">CURRENT STATUS</div><div className="status-summary"><span className={"status-pulse " + activeEmployee.status.toLowerCase().replace(" ", "-")} /><div><strong>{activeEmployee.status}</strong><small>{activeEmployee.task ? "Currently focused on " + activeEmployee.task : "No active task assigned"}</small></div></div>
-            <div className="detail-section-title">AI CONFIGURATION</div><label className="field-label">Communication tone<select value={activeEmployee.tone} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, tone: e.target.value } : x))}><option>Clear & concise</option><option>Thoughtful & creative</option><option>Warm & articulate</option><option>Analytical</option><option>Practical & direct</option><option>Curious & collaborative</option><option>Formal</option><option>Friendly</option></select></label>
+            <div className="detail-section-title">AI CONFIGURATION</div><label className="field-label">Department<select value={activeEmployee.deptId} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, deptId: e.target.value } : x))}>{depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+            <label className="field-label">Communication tone<select value={activeEmployee.tone} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, tone: e.target.value } : x))}><option>Clear & concise</option><option>Thoughtful & creative</option><option>Warm & articulate</option><option>Analytical</option><option>Practical & direct</option><option>Curious & collaborative</option><option>Formal</option><option>Friendly</option></select></label>
             <label className="field-label">AI model<select value={activeEmployee.model} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, model: e.target.value } : x))}><option>GPT-4o mini</option><option>GPT-4o</option><option>Claude Sonnet</option><option>Auto</option></select></label>
             <label className="field-label">Custom instructions<textarea rows={4} value={activeEmployee.instructions} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, instructions: e.target.value } : x))} placeholder="How should this employee work?" /></label>
             <div className="detail-note"><ShieldCheck size={15} /><span>Changes are saved automatically in this browser.</span></div>
@@ -290,7 +304,7 @@ export default function App() {
         </div>}
         {page === "Jobs & approvals" && <div className="page-wrap"><div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> Operations</div><h1>Jobs & approvals</h1><p>Track delegated work and review submitted results.</p></div><button className="primary-button" onClick={() => setShowJobForm(true)}><Plus size={16} /> Assign a job</button></div><div className="job-filters"><span>{jobs.length} total jobs</span><span className="filter-pill">{jobs.filter((j) => j.status === "Queued").length} queued</span><span className="filter-pill review">{jobs.filter((j) => j.status === "Submitted").length} awaiting review</span></div><div className="panel all-jobs">{jobs.map((j) => { const emp = employeeMap.get(j.employeeId); return <div className="all-job-row" key={j.id}><span className="avatar">{initials(emp?.name ?? "AI")}</span><div className="all-job-copy"><strong>{j.title}</strong><small>Assigned to {emp?.name ?? "Unassigned"} · {j.created}</small></div><span className={"job-status " + j.status.toLowerCase().replace(" ", "-")}>{j.status}</span>{j.status === "Queued" && <button className="secondary-button compact-button" onClick={() => { setJobs((old) => old.map((x) => x.id === j.id ? { ...x, status: "In progress" } : x)); notify("Job started"); }}>Start job</button>}{j.status === "In progress" && <button className="secondary-button compact-button" onClick={() => submitJob(j.id)}>Submit work</button>}{j.status === "Submitted" && <button className="primary-button compact-button" onClick={() => approveJob(j.id)}><Check size={14} /> Approve</button>}{j.status === "Approved" && <span className="approved-check"><CheckCheck size={16} /> Complete</span>}</div>; })}{jobs.length === 0 && <div className="empty-state">No jobs created yet.</div>}</div></div>}
         {page === "Settings" && <div className="page-wrap settings-page"><div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> Configuration</div><h1>Settings</h1><p>Configure how your AI team works and what it can access.</p></div><span className="saved-badge"><Check size={13} /> Saved automatically</span></div><div className="settings-layout"><div className="settings-tabs">{["General", "Security", "Rulesets", "Connectors", "Automation & limits"].map((item) => <button className={activeSettings === item ? "active" : ""} key={item} onClick={() => setActiveSettings(item)}>{item}</button>)}</div><section className="panel settings-content">
-          {activeSettings === "General" && <><h2>General preferences</h2><p className="settings-intro">Manage the basics for {company.name}.</p><label className="field-label">Company name<input value={company.name} onChange={(e) => setCompany({ ...company, name: e.target.value })} /></label><div className="settings-info-row"><div><strong>Workspace appearance</strong><small>Clean, light interface optimised for daily work.</small></div><span className="setting-pill">Light</span></div><div className="settings-info-row"><div><strong>Data storage</strong><small>Demo mode stores changes in this browser. Configure Supabase for shared, multi-user persistence.</small></div><span className="setting-pill warning">Local demo</span></div></>}
+          {activeSettings === "General" && <><h2>General preferences</h2><p className="settings-intro">Manage the basics for {company.name}.</p><label className="field-label">Company name<input value={company.name} onChange={(e) => { const updated = { ...company, name: e.target.value }; setCompany(updated); setCompanies((old) => old.map((item) => item.id === updated.id ? updated : item)); }} /></label><div className="settings-info-row"><div><strong>Workspace appearance</strong><small>Clean, light interface optimised for daily work.</small></div><span className="setting-pill">Light</span></div><div className="settings-info-row"><div><strong>Data storage</strong><small>Demo mode stores changes in this browser. Configure Supabase for shared, multi-user persistence.</small></div><span className="setting-pill warning">Local demo</span></div></>}
           {activeSettings === "Security" && <><h2>Security & permissions</h2><p className="settings-intro">Keep sensitive work under control.</p><div className="setting-toggle-row"><div><strong>Require approval before jobs run</strong><small>New assignments wait for a human to approve before they begin.</small></div><button className={"toggle " + (settings.approvalRequired ? "on" : "")} onClick={() => setSettings({ ...settings, approvalRequired: !settings.approvalRequired })}><span /></button></div><div className="settings-info-row"><div><strong>External actions</strong><small>External publishing and connector writes should require explicit approval.</small></div><span className="setting-pill">Approval gated</span></div><div className="settings-info-row"><div><strong>Credentials</strong><small>Never store provider secrets in frontend code. Use server-side secrets for production.</small></div><span className="setting-pill">Protected</span></div></>}
           {activeSettings === "Rulesets" && <><h2>Rulesets</h2><p className="settings-intro">Company-wide guardrails applied to every employee.</p><div className="rule-card"><span className="rule-icon"><ShieldCheck size={17} /></span><div><strong>Human approval for consequential actions</strong><small>Publishing, sending messages externally, spending and deleting data require confirmation.</small></div><span className="setting-pill green-pill">Enabled</span></div><div className="rule-card"><span className="rule-icon"><LockKeyhole size={17} /></span><div><strong>Keep company data private</strong><small>Employees should only use the context required for their assigned work.</small></div><span className="setting-pill green-pill">Enabled</span></div><div className="rule-card"><span className="rule-icon"><CheckCheck size={17} /></span><div><strong>Require evidence in submissions</strong><small>Ask employees to include the result, relevant links and unresolved issues.</small></div><span className="setting-pill green-pill">Enabled</span></div><button className="secondary-button" onClick={() => notify("Ruleset editor is planned for the next iteration")}><Plus size={14} /> Add custom ruleset</button></>}
           {activeSettings === "Connectors" && <><h2>Enabled connectors</h2><p className="settings-intro">Manage services your company workspace can use.</p>{["Puter AI", "Supabase", "GitHub", "Google Drive", "Slack", "Web search"].map((name) => <div className="connector-row" key={name}><span className="connector-icon">{name === "Puter AI" ? <Sparkles size={17} /> : name === "Supabase" ? <Zap size={17} /> : name === "GitHub" ? <Command size={17} /> : <Workflow size={17} />}</span><div><strong>{name}</strong><small>{name === "Puter AI" ? "AI chat and model access in the browser" : name === "Supabase" ? "Database and authentication (not connected in demo mode)" : name === "GitHub" ? "Repository and delivery workflows" : "Available to connect in a future iteration"}</small></div><button className={"connector-action " + (settings.connectors.includes(name) ? "enabled" : "")} onClick={() => setSettings({ ...settings, connectors: settings.connectors.includes(name) ? settings.connectors.filter((x) => x !== name) : [...settings.connectors, name] })}>{settings.connectors.includes(name) ? <><Check size={13} /> Enabled</> : "Enable"}</button></div>)}</>}
@@ -300,7 +314,7 @@ export default function App() {
     </div>
     {toast && <div className="toast"><Check size={15} />{toast}</div>}
     {showJobForm && <div className="modal-backdrop" onClick={() => setShowJobForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createJob}><button type="button" className="modal-close" onClick={() => setShowJobForm(false)}>×</button><span className="modal-kicker"><Inbox size={14} /> JOB ASSIGNMENT</span><h2>Assign a job</h2><p>Give an employee a clear outcome to work towards.</p><label>Job title<input autoFocus value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} placeholder="e.g. Draft a launch plan" required /></label><label>Assign to<select value={jobEmployee} onChange={(e) => setJobEmployee(e.target.value)}>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}</select></label><div className="modal-note"><ShieldCheck size={15} />{settings.approvalRequired ? "This job will be queued for approval before running." : "This job will be marked in progress immediately."}</div><button className="primary-button modal-submit" type="submit">Create job <ArrowUpRight size={15} /></button></form></div>}
-    {showEmployeeForm && <div className="modal-backdrop" onClick={() => setShowEmployeeForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createEmployee}><button type="button" className="modal-close" onClick={() => setShowEmployeeForm(false)}>×</button><span className="modal-kicker"><Users size={14} /> TEAM SETUP</span><h2>Add an employee</h2><p>Create a new AI teammate for this workspace.</p><label>Full name<input autoFocus value={employeeName} onChange={(e) => setEmployeeName(e.target.value)} placeholder="e.g. Sam Taylor" required /></label><label>Role<input value={employeeRole} onChange={(e) => setEmployeeRole(e.target.value)} placeholder="e.g. Research analyst" required /></label><label>Department<select>{depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label><button className="primary-button modal-submit" type="submit">Create employee <Plus size={15} /></button></form></div>}
+    {showEmployeeForm && <div className="modal-backdrop" onClick={() => setShowEmployeeForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createEmployee}><button type="button" className="modal-close" onClick={() => setShowEmployeeForm(false)}>×</button><span className="modal-kicker"><Users size={14} /> TEAM SETUP</span><h2>Add an employee</h2><p>Create a new AI teammate for this workspace.</p><label>Full name<input autoFocus value={employeeName} onChange={(e) => setEmployeeName(e.target.value)} placeholder="e.g. Sam Taylor" required /></label><label>Role<input value={employeeRole} onChange={(e) => setEmployeeRole(e.target.value)} placeholder="e.g. Research analyst" required /></label><label>Department<select value={newEmployeeDept} onChange={(e) => setNewEmployeeDept(e.target.value)}>{depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label><button className="primary-button modal-submit" type="submit">Create employee <Plus size={15} /></button></form></div>}
     {showChatForm && <div className="modal-backdrop" onClick={() => setShowChatForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createConversation}><button type="button" className="modal-close" onClick={() => setShowChatForm(false)}>×</button><span className="modal-kicker"><MessageCircle size={14} /> COMMUNICATION</span><h2>New conversation</h2><p>Start a private chat or bring a few employees together.</p><label>Conversation name<input autoFocus value={newChatName} onChange={(e) => setNewChatName(e.target.value)} placeholder="e.g. Website launch" required /></label><label>Invite employees<select multiple value={newChatMembers} onChange={(e) => setNewChatMembers(Array.from(e.target.selectedOptions, (o) => o.value))}>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}</select><small className="input-help">Choose one employee for a private chat, or several for a group.</small></label><button className="primary-button modal-submit" type="submit">Create conversation <ArrowUpRight size={15} /></button></form></div>}
   </div>;
 }
