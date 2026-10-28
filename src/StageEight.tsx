@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Check, Flag, Plus, RefreshCw, Target, TrendingUp } from 'lucide-react';
+import { Check, Plus, RefreshCw, Target, TrendingUp } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 type Goal={id:string;company_id:string;created_by:string;title:string;description:string;metric_name:string;unit:string;baseline_value:number;current_value:number;target_value:number;due_date:string|null;status:'planned'|'active'|'paused'|'completed';created_at:string;updated_at:string};
