@@ -105,7 +105,7 @@ export default function App() {
     }).catch((error: unknown) => { if (active) { setAuthError(error instanceof Error ? error.message : "Could not initialise sign-in"); setAuthLoading(false); } });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
-      if (!session?.user) { setCompany(null); setCompanies([]); setLoadedCompanyId(null); }
+      if (!session?.user) { setCompany(null); setCompanies([]); setLoadedCompanyId(null); inviteHandledRef.current = false; }
     });
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
@@ -181,7 +181,7 @@ export default function App() {
     setAuthBusy(true);
     try {
       if (authMode === "signup") {
-        const { data, error } = await supabase.auth.signUp({ email: authEmail.trim(), password: authPassword, options: { emailRedirectTo: window.location.origin + import.meta.env.BASE_URL } });
+        const { data, error } = await supabase.auth.signUp({ email: authEmail.trim(), password: authPassword, options: { emailRedirectTo: window.location.origin + import.meta.env.BASE_URL + window.location.search } });
         if (error) throw error;
         if (!data.session) setAuthNotice("Account created. Check your email to confirm your address, then sign in.");
         else setAuthNotice("Account created successfully.");
