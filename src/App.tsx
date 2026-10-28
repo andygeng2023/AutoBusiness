@@ -83,7 +83,8 @@ export default function App() {
   const [newChatName, setNewChatName] = useState("");
   const [newChatMembers, setNewChatMembers] = useState<string[]>([]);
   const [toast, setToast] = useState("");
-  const [busy, setBusy] = useState(false);\n  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [activeSettings, setActiveSettings] = useState("General");
 
   useEffect(() => { persist("companies", companies); }, [companies]);
@@ -162,7 +163,7 @@ export default function App() {
     if (!window.puter?.ai?.chat) { notify("AI execution is unavailable: Puter.js did not load"); return; }
     setBusy(true);
     try {
-      const prompt = "You are " + emp.name + ", " + emp.role + " working on a delegated job in a company workspace. Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\\n\\nJOB: " + job.title + "\\n\\nProduce the actual deliverable for this job, not a plan to do it. Use clear headings and concrete content. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly.";
+      const prompt = "You are " + emp.name + ", " + emp.role + " working on a delegated job in a company workspace. Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\n\nJOB: " + job.title + "\n\nProduce the actual deliverable for this job, not a plan to do it. Use clear headings and concrete content. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly.";
       const model = emp.model.includes("Claude") ? "claude-sonnet-4" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
       const response = await window.puter.ai.chat(prompt, { model });
       const output = typeof response === "string" ? response : String((response as { message?: { content?: unknown } })?.message?.content ?? "");
