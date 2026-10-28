@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { BookOpen, Check, Download, FileText, Plus, RefreshCw, Search, ShieldCheck, X } from 'lucide-react';
+import { BookOpen, Check, Download, Plus, RefreshCw, Search, ShieldCheck, X } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 type KnowledgeItem = { id: string; company_id: string; title: string; content: string; category: string; tags: string[]; status: 'draft'|'published'|'archived'; created_by: string; created_at: string; updated_at: string };
