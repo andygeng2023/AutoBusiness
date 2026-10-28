@@ -100,3 +100,13 @@ Analytics are operational summaries, not financial accounting. Missing provider 
 - Browser-local demo mode and Supabase-backed production records.
 
 Apply migration `0008_stage8_goals_kpis.sql` before using this feature with Supabase. Progress is an operational indicator based on baseline-to-target ratio, not a financial accounting or HR assessment.
+
+
+## Stage 9: Activity and audit log
+
+- Add a searchable, company-scoped audit history view with action metadata and CSV export.
+- Keep browser-local demo activity clearly labelled as local-only, not a tamper-resistant shared audit record.
+- Add a covering index for company audit-history queries while retaining existing row-level security policies.
+- Fix Stage 6 analytics/workspace loading: the employees table stores names in `full_name`, not `name`; the incorrect select caused the combined Stage 6 record load to fail.
+
+Apply migration `0009_stage9_audit_log.sql` before using the audit-log view with a fresh production database. The view displays recorded events only; it does not claim all modules currently emit audit events.
