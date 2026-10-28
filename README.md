@@ -5,7 +5,8 @@ AutoBusiness is a multi-company workspace for configuring AI employees, assignin
 ## Current capabilities
 
 - Supabase email/password authentication with persistent sessions.
-- Company creation and membership-scoped company lists.\n- Owner/admin invitation links restricted to the invited email, hashed at rest, and expiring after seven days.
+- Company creation and membership-scoped company lists.
+- Owner/admin invitation links restricted to the invited email, hashed at rest, and expiring after seven days.
 - Cloud-backed departments, employees, job briefs, job results, review feedback, conversations, messages, workspace settings, and goals.
 - Row-level security for workspace data; unauthenticated access to workspace tables is revoked. Private employee conversations and their messages are limited to the creating member, while group chats are available to company members.
 - Real dashboard counts based on stored employee, job, deliverable, and goal records rather than seeded example metrics.
