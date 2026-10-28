@@ -11,9 +11,11 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { puterChat } from './lib/puter';
 import type { AppUser, Company, WorkspaceData } from './types';
 import StageTwo from './StageTwo';
+import StageThree from './StageThree';
 import './stage-two.css';
+import './stage-three.css';
 
-type Page = 'Overview' | 'Companies' | 'Employees' | 'Departments' | 'Projects' | 'Operations' | 'Knowledge' | 'Approvals' | 'Analytics' | 'Integrations' | 'Settings';
+type Page = 'Overview' | 'Companies' | 'Employees' | 'Departments' | 'Projects' | 'Operations' | 'AI Studio' | 'Knowledge' | 'Approvals' | 'Analytics' | 'Integrations' | 'Settings';
 
 const navigation: { label: Page; icon: typeof LayoutDashboard; group: string }[] = [
   { label: 'Overview', icon: LayoutDashboard, group: 'WORKSPACE' },
@@ -22,6 +24,7 @@ const navigation: { label: Page; icon: typeof LayoutDashboard; group: string }[]
   { label: 'Departments', icon: FolderKanban, group: 'MANAGEMENT' },
   { label: 'Projects', icon: FileText, group: 'MANAGEMENT' },
   { label: 'Operations', icon: Activity, group: 'MANAGEMENT' },
+  { label: 'AI Studio', icon: Bot, group: 'MANAGEMENT' },
   { label: 'Knowledge', icon: FileText, group: 'RESOURCES' },
   { label: 'Approvals', icon: ShieldCheck, group: 'RESOURCES' },
   { label: 'Analytics', icon: ArrowUpRight, group: 'RESOURCES' },
@@ -350,9 +353,10 @@ export default function App() {
           {page === 'Settings' && <section className="subpage"><div className="subpage-heading"><div><p className="eyebrow">ADMINISTRATION</p><h1>Company settings</h1><p className="muted">Manage the selected company's basic information.</p></div></div>{activeCompany ? <form className="panel settings-form" onSubmit={saveCompanySettings}><label>Company name<input value={settingsName} onChange={(e) => setSettingsName(e.target.value)} maxLength={80} required /></label><label>Industry<input value={activeCompany.industry} readOnly /></label><label>Description<textarea value={activeCompany.description} readOnly rows={3} /><small>Editing descriptions will be added with the full company profile editor.</small></label><button className="primary-button" type="submit">Save changes</button></form> : <EmptyState onCreate={() => setCreateOpen(true)} />}</section>}
 
           {(['Employees', 'Departments', 'Projects', 'Operations'] as const).includes(page as 'Employees' | 'Departments' | 'Projects' | 'Operations') && <StageTwo page={page as 'Employees' | 'Departments' | 'Projects' | 'Operations'} companyId={activeCompany?.id ?? null} userId={user?.id ?? null} demoMode={demoMode} />}
+          {page === 'AI Studio' && <StageThree companyId={activeCompany?.id ?? null} userId={user?.id ?? null} demoMode={demoMode} />}
 
-          {!['Overview', 'Companies', 'Settings', 'Employees', 'Departments', 'Projects', 'Operations'].includes(page) && <section className="subpage"><div className="subpage-heading"><div><p className="eyebrow">AUTOBUSINESS</p><h1>{page}</h1><p className="muted">This workspace section is planned for a later implementation stage.</p></div></div><div className="panel roadmap-card"><div className="roadmap-icon"><Bot size={24} /></div><h2>{page} is on the roadmap</h2><p>Stage 2 now includes workforce profiles, departments, projects and task tracking. This section will connect to the same company-scoped data and permission model in a later stage.</p><div className="roadmap-note"><ShieldCheck size={17} /><span>Records are scoped to the selected company and protected by Supabase row-level security when connected.</span></div></div></section>}
-          <footer className="page-footer"><span>AutoBusiness <span className="footer-separator">·</span> Stage 1 foundation</span><span><span className="status-dot" /> {demoMode ? 'Browser-local demo' : 'Supabase connected'}</span></footer>
+          {!['Overview', 'Companies', 'Settings', 'Employees', 'Departments', 'Projects', 'Operations', 'AI Studio'].includes(page) && <section className="subpage"><div className="subpage-heading"><div><p className="eyebrow">AUTOBUSINESS</p><h1>{page}</h1><p className="muted">This workspace section is planned for a later implementation stage.</p></div></div><div className="panel roadmap-card"><div className="roadmap-icon"><Bot size={24} /></div><h2>{page} is on the roadmap</h2><p>Stage 3 adds user-triggered AI planning sessions with a saved, auditable run history. This section will connect to the same company-scoped data and permission model in a later stage.</p><div className="roadmap-note"><ShieldCheck size={17} /><span>Records are scoped to the selected company and protected by Supabase row-level security when connected.</span></div></div></section>}
+          <footer className="page-footer"><span>AutoBusiness <span className="footer-separator">·</span> Stages 1–3</span><span><span className="status-dot" /> {demoMode ? 'Browser-local demo' : 'Supabase connected'}</span></footer>
         </div>
       </main>
 
