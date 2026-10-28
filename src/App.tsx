@@ -190,16 +190,71 @@ export default function App() {
   ];
 
   const notify = (text: string) => setToast(text);
-  const openCompany = (item: Company) => {
+  const openCompany = async (item: Company) => {
     setCompany(item);
-    setDepts(readStore("depts:" + item.id, seedDepts));
-    setEmployees(readStore("employees:" + item.id, seedEmployees));
-    setJobs(readStore("jobs:" + item.id, seedJobs));
-    setConversations(readStore("conversations:" + item.id, seedConversations));
-    setSettings(readStore("settings:" + item.id, defaultSettings));
-    setSelectedEmployee("maya");
-    setSelectedChat("team");
+    setLoadedCompanyId(null);
+    setLoadingWorkspace(true);
     setPage("Dashboard");
+    try {
+      const [deptRes, employeeRes, jobRes, convRes, messageRes, memberRes, settingsRes, goalRes] = await Promise.all([
+        supabase.from("departments").select("*").eq("company_id", item.id).order("created_at"),
+        supabase.from("employees").select("*").eq("company_id", item.id).order("created_at"),
+        supabase.from("jobs").select("*").eq("company_id", item.id).order("created_at", { ascending: false }),
+        supabase.from("conversations").select("*").eq("company_id", item.id).order("created_at"),
+        supabase.from("messages").select("*").eq("company_id", item.id).order("created_at"),
+        supabase.from("conversation_members").select("*").eq("company_id", item.id),
+        supabase.from("workspace_settings").select("*").eq("company_id", item.id).maybeSingle(),
+        supabase.from("goals").select("*").eq("company_id", item.id).order("created_at", { ascending: false })
+      ]);
+      const error = [deptRes, employeeRes, jobRes, convRes, messageRes, memberRes, settingsRes, goalRes].find((result) => result.error)?.error;
+      if (error) throw error;
+      const departmentRows = deptRes.data ?? [];
+      const employeeRows = employeeRes.data ?? [];
+      const conversationRows = convRes.data ?? [];
+      const messageRows = messageRes.data ?? [];
+      const memberRows = memberRes.data ?? [];
+      const nextEmployees: Employee[] = employeeRows.map((row: any) => ({
+        id: row.id, name: row.name, role: row.role, deptId: row.department_id ?? "", tone: row.tone,
+        model: row.model, instructions: row.custom_instructions, status: row.status === "needs_review" ? "Needs review" : row.status === "working" ? "Working" : row.status === "paused" ? "Available" : "Available",
+        task: row.current_task ?? undefined
+      }));
+      setDepts(departmentRows.map((row: any) => ({ id: row.id, name: row.name, parentId: row.parent_id ?? undefined })));
+      setEmployees(nextEmployees);
+      setJobs((jobRes.data ?? []).map((row: any) => ({
+        id: row.id, title: row.title, description: row.description, employeeId: row.employee_id ?? "",
+        status: row.status === "in_progress" ? "In progress" : row.status === "submitted" ? "Submitted" : row.status === "approved" ? "Approved" : row.status === "rejected" ? "Rejected" : "Queued",
+        priority: row.priority === "urgent" || row.priority === "high" ? "Urgent" : "Normal",
+        created: new Date(row.created_at).toLocaleString(), result: row.result || undefined,
+        submittedAt: row.submitted_at ? new Date(row.submitted_at).toLocaleString() : undefined,
+        createdBy: row.created_by
+      })));
+      setConversations(conversationRows.map((row: any) => ({
+        id: row.id, name: row.name, kind: row.kind,
+        createdBy: row.created_by,
+        members: memberRows.filter((member: any) => member.conversation_id === row.id && member.employee_id).map((member: any) => member.employee_id),
+        messages: messageRows.filter((message: any) => message.conversation_id === row.id).map((message: any) => ({
+          id: message.id, from: message.sender_user_id ? (message.sender_user_id === user?.id ? "you" : "system") : message.sender_employee_id ?? "system",
+          text: message.body, time: new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          createdAt: message.created_at, jobId: message.job_id ?? undefined
+        }))
+      })));
+      const dbSettings = settingsRes.data;
+      setSettings(dbSettings ? {
+        approvalRequired: dbSettings.approval_required, autoRun: dbSettings.auto_run,
+        dailyLimit: dbSettings.daily_usage_limit, monthlyLimit: dbSettings.monthly_usage_limit,
+        connectors: (dbSettings.enabled_connectors ?? ["puter"]).map((name: string) => ({ puter: "Puter AI", github: "GitHub", supabase: "Supabase", google_drive: "Google Drive", slack: "Slack", web_search: "Web search" }[name] ?? name))
+      } : defaultSettings);
+      setGoals((goalRes.data ?? []).map((row: any) => ({ id: row.id, title: row.title, description: row.description, progress: Number(row.progress), dueDate: row.due_date ?? undefined, status: row.status })));
+      setSelectedEmployee(nextEmployees[0]?.id ?? "");
+      setJobEmployee(nextEmployees[0]?.id ?? "");
+      setSelectedChat(conversationRows[0]?.id ?? "");
+      setLoadedCompanyId(item.id);
+    } catch (error) {
+      notify("Could not load this workspace: " + (error instanceof Error ? error.message : "Unknown database error"));
+      setLoadedCompanyId(null);
+    } finally {
+      setLoadingWorkspace(false);
+    }
   };
   const changePage = (next: string) => { setPage(next); if (next === "Communication") setSelectedChat("team"); };
   const createJob = (event: FormEvent) => {
