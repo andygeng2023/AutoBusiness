@@ -10,6 +10,8 @@ import { createAuditEvent, emptyWorkspace, readDemoWorkspace, writeDemoWorkspace
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { puterChat } from './lib/puter';
 import type { AppUser, Company, WorkspaceData } from './types';
+import StageTwo from './StageTwo';
+import './stage-two.css';
 
 type Page = 'Overview' | 'Companies' | 'Employees' | 'Departments' | 'Projects' | 'Operations' | 'Knowledge' | 'Approvals' | 'Analytics' | 'Integrations' | 'Settings';
 
@@ -347,7 +349,9 @@ export default function App() {
 
           {page === 'Settings' && <section className="subpage"><div className="subpage-heading"><div><p className="eyebrow">ADMINISTRATION</p><h1>Company settings</h1><p className="muted">Manage the selected company's basic information.</p></div></div>{activeCompany ? <form className="panel settings-form" onSubmit={saveCompanySettings}><label>Company name<input value={settingsName} onChange={(e) => setSettingsName(e.target.value)} maxLength={80} required /></label><label>Industry<input value={activeCompany.industry} readOnly /></label><label>Description<textarea value={activeCompany.description} readOnly rows={3} /><small>Editing descriptions will be added with the full company profile editor.</small></label><button className="primary-button" type="submit">Save changes</button></form> : <EmptyState onCreate={() => setCreateOpen(true)} />}</section>}
 
-          {!['Overview', 'Companies', 'Settings'].includes(page) && <section className="subpage"><div className="subpage-heading"><div><p className="eyebrow">AUTOBUSINESS</p><h1>{page}</h1><p className="muted">This workspace section is planned for a later implementation stage.</p></div></div><div className="panel roadmap-card"><div className="roadmap-icon"><Bot size={24} /></div><h2>{page} is on the roadmap</h2><p>The Stage 1 foundation is in place. This section will connect to the shared company and permission model as its feature set is implemented.</p><div className="roadmap-note"><ShieldCheck size={17} /><span>Company data access and audit foundations are being established before autonomous actions are enabled.</span></div></div></section>}
+          {(['Employees', 'Departments', 'Projects', 'Operations'] as const).includes(page as 'Employees' | 'Departments' | 'Projects' | 'Operations') && <StageTwo page={page as 'Employees' | 'Departments' | 'Projects' | 'Operations'} companyId={activeCompany?.id ?? null} userId={user?.id ?? null} demoMode={demoMode} />}
+
+          {!['Overview', 'Companies', 'Settings', 'Employees', 'Departments', 'Projects', 'Operations'].includes(page) && <section className="subpage"><div className="subpage-heading"><div><p className="eyebrow">AUTOBUSINESS</p><h1>{page}</h1><p className="muted">This workspace section is planned for a later implementation stage.</p></div></div><div className="panel roadmap-card"><div className="roadmap-icon"><Bot size={24} /></div><h2>{page} is on the roadmap</h2><p>Stage 2 now includes workforce profiles, departments, projects and task tracking. This section will connect to the same company-scoped data and permission model in a later stage.</p><div className="roadmap-note"><ShieldCheck size={17} /><span>Records are scoped to the selected company and protected by Supabase row-level security when connected.</span></div></div></section>}
           <footer className="page-footer"><span>AutoBusiness <span className="footer-separator">·</span> Stage 1 foundation</span><span><span className="status-dot" /> {demoMode ? 'Browser-local demo' : 'Supabase connected'}</span></footer>
         </div>
       </main>
