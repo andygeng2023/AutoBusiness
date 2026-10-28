@@ -71,35 +71,63 @@ alter table public.projects enable row level security;
 alter table public.tasks enable row level security;
 
 drop policy if exists "Company members read departments" on public.departments;
+drop policy if exists "Company editors manage departments" on public.departments;
+drop policy if exists "Company editors insert departments" on public.departments;
+drop policy if exists "Company editors update departments" on public.departments;
+drop policy if exists "Company admins delete departments" on public.departments;
 create policy "Company members read departments" on public.departments for select to authenticated
 using (exists (select 1 from public.companies c where c.id = company_id and public.is_org_member(c.organisation_id)));
-drop policy if exists "Company editors manage departments" on public.departments;
-create policy "Company editors manage departments" on public.departments for all to authenticated
-using (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])))
+create policy "Company editors insert departments" on public.departments for insert to authenticated
 with check (created_by = (select auth.uid()) and exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])));
+create policy "Company editors update departments" on public.departments for update to authenticated
+using (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])))
+with check (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])));
+create policy "Company admins delete departments" on public.departments for delete to authenticated
+using (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin'])));
 
 drop policy if exists "Company members read employees" on public.employees;
+drop policy if exists "Company editors manage employees" on public.employees;
+drop policy if exists "Company editors insert employees" on public.employees;
+drop policy if exists "Company editors update employees" on public.employees;
+drop policy if exists "Company admins delete employees" on public.employees;
 create policy "Company members read employees" on public.employees for select to authenticated
 using (exists (select 1 from public.companies c where c.id = company_id and public.is_org_member(c.organisation_id)));
-drop policy if exists "Company editors manage employees" on public.employees;
-create policy "Company editors manage employees" on public.employees for all to authenticated
-using (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])))
+create policy "Company editors insert employees" on public.employees for insert to authenticated
 with check (created_by = (select auth.uid()) and exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])));
+create policy "Company editors update employees" on public.employees for update to authenticated
+using (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])))
+with check (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])));
+create policy "Company admins delete employees" on public.employees for delete to authenticated
+using (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin'])));
 
 drop policy if exists "Company members read projects" on public.projects;
+drop policy if exists "Company editors manage projects" on public.projects;
+drop policy if exists "Company editors insert projects" on public.projects;
+drop policy if exists "Company editors update projects" on public.projects;
+drop policy if exists "Company admins delete projects" on public.projects;
 create policy "Company members read projects" on public.projects for select to authenticated
 using (exists (select 1 from public.companies c where c.id = company_id and public.is_org_member(c.organisation_id)));
-drop policy if exists "Company editors manage projects" on public.projects;
-create policy "Company editors manage projects" on public.projects for all to authenticated
-using (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])))
+create policy "Company editors insert projects" on public.projects for insert to authenticated
 with check (created_by = (select auth.uid()) and exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])));
+create policy "Company editors update projects" on public.projects for update to authenticated
+using (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])))
+with check (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])));
+create policy "Company admins delete projects" on public.projects for delete to authenticated
+using (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin'])));
 
 drop policy if exists "Company members read tasks" on public.tasks;
+drop policy if exists "Company editors manage tasks" on public.tasks;
+drop policy if exists "Company editors insert tasks" on public.tasks;
+drop policy if exists "Company editors update tasks" on public.tasks;
+drop policy if exists "Company admins delete tasks" on public.tasks;
 create policy "Company members read tasks" on public.tasks for select to authenticated
 using (exists (select 1 from public.companies c where c.id = company_id and public.is_org_member(c.organisation_id)));
-drop policy if exists "Company editors manage tasks" on public.tasks;
-create policy "Company editors manage tasks" on public.tasks for all to authenticated
-using (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])))
+create policy "Company editors insert tasks" on public.tasks for insert to authenticated
 with check (created_by = (select auth.uid()) and exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])));
+create policy "Company editors update tasks" on public.tasks for update to authenticated
+using (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])))
+with check (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin','member'])));
+create policy "Company admins delete tasks" on public.tasks for delete to authenticated
+using (exists (select 1 from public.companies c where c.id = company_id and public.has_org_role(c.organisation_id, array['owner','admin'])));
 
 grant select, insert, update, delete on public.departments, public.employees, public.projects, public.tasks to authenticated;
