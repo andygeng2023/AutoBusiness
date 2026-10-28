@@ -70,7 +70,8 @@ export default function App() {
   const [selectedChat, setSelectedChat] = useState("team");
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
-  const [jobTitle, setJobTitle] = useState("");\n  const [jobDescription, setJobDescription] = useState("");\n  const [jobPriority, setJobPriority] = useState<"Normal" | "Urgent">("Normal");\n  const [jobSearch, setJobSearch] = useState("");\n  const [jobStatusFilter, setJobStatusFilter] = useState("All statuses");\n  const [reviewNote, setReviewNote] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
+  const [jobDescription, setJobDescription] = useState("");\n  const [jobPriority, setJobPriority] = useState<"Normal" | "Urgent">("Normal");\n  const [jobSearch, setJobSearch] = useState("");\n  const [jobStatusFilter, setJobStatusFilter] = useState("All statuses");\n  const [reviewNote, setReviewNote] = useState("");
   const [jobEmployee, setJobEmployee] = useState("maya");
   const [showJobForm, setShowJobForm] = useState(false);
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
@@ -177,7 +178,9 @@ export default function App() {
       notify(error instanceof Error ? error.message : "Could not execute this job");
     } finally { setBusy(false); }
   };
-  const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "" } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };\n  const requestRevision = (jobId: string) => { if (!reviewNote.trim()) { notify("Add a note explaining what needs to change"); return; } setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Rejected", reviewNote: reviewNote.trim() } : j)); notify("Revision requested — feedback saved to the job"); };\n  const deleteJob = (jobId: string) => { setJobs((old) => old.filter((j) => j.id !== jobId)); setSelectedJobId((current) => current === jobId ? null : current); notify("Job deleted"); };
+  const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "" } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
+  const requestRevision = (jobId: string) => { if (!reviewNote.trim()) { notify("Add a note explaining what needs to change"); return; } setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Rejected", reviewNote: reviewNote.trim() } : j)); notify("Revision requested — feedback saved to the job"); };
+  const deleteJob = (jobId: string) => { setJobs((old) => old.filter((j) => j.id !== jobId)); setSelectedJobId((current) => current === jobId ? null : current); notify("Job deleted"); };
   const createCompany = (event: FormEvent) => {
     event.preventDefault(); if (!companyName.trim()) return;
     const name = companyName.trim(); const item = { id: crypto.randomUUID(), name, industry: "New workspace", initials: initials(name), color: "blue", description: "Your new company workspace" };
