@@ -80,3 +80,13 @@ This is a Stage 1 foundation, not a finished autonomous-agent platform. Demo-mod
 - New RLS-protected `company_knowledge_items` table and supporting indexes.
 
 Analytics are operational summaries, not financial accounting. Missing provider cost data is not treated as zero-cost usage. Production use requires applying migration `0006_stage6_knowledge.sql`; demo mode uses browser-local data.
+
+
+## Stage 7: Automation studio
+
+- Company-scoped automation rules with a manual trigger and a task-creation action.
+- Enable/disable controls, run-now execution, success/failure history, and CSV export.
+- Production task creation and execution history use Supabase row-level security.
+- Demo mode stores automation rules, run history, and demo-created tasks in browser-local storage.
+
+**Execution boundary:** this stage runs only when a member clicks Run now. Scheduled jobs, event-driven triggers, external integrations, and background workers are not implemented. Apply `0007_stage7_automation_studio.sql` before using the feature with Supabase.
