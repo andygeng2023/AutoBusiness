@@ -263,9 +263,17 @@ export default function App() {
   const createJob = (event: FormEvent) => {
     event.preventDefault();
     if (!jobTitle.trim() || !company || !user || !jobEmployee) { notify("Create an employee before assigning a job"); return; }
-    const job: Job = { id: crypto.randomUUID(), title: jobTitle.trim(), description: jobDescription.trim(), employeeId: jobEmployee, status: settings.approvalRequired ? "Queued" : "In progress", priority: jobPriority, created: new Date().toISOString(), createdBy: user.id };
+    const now = new Date();
+    const countInPeriod = (job: Job, period: "day" | "month") => {
+      const parsed = Date.parse(job.created);
+      const date = new Date(Number.isNaN(parsed) ? Date.now() : parsed);
+      return period === "day" ? date.toDateString() === now.toDateString() : date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+    };
+    if (jobs.filter((job) => countInPeriod(job, "day")).length >= settings.dailyLimit) { notify("Daily job creation limit reached. Increase the limit in Settings to assign more work."); return; }
+    if (jobs.filter((job) => countInPeriod(job, "month")).length >= settings.monthlyLimit) { notify("Monthly job creation limit reached. Increase the limit in Settings to assign more work."); return; }
+    const job: Job = { id: crypto.randomUUID(), title: jobTitle.trim(), description: jobDescription.trim(), employeeId: jobEmployee, status: settings.autoRun || !settings.approvalRequired ? "In progress" : "Queued", priority: jobPriority, created: new Date().toISOString(), createdBy: user.id };
     setJobs((old) => [job, ...old]);
-    setEmployees((old) => old.map((e) => e.id === jobEmployee ? { ...e, status: settings.approvalRequired ? "Available" : "Working", task: job.title } : e));
+    setEmployees((old) => old.map((e) => e.id === jobEmployee ? { ...e, status: job.status === "Queued" ? "Available" : "Working", task: job.title } : e));
     setJobTitle(""); setJobDescription(""); setJobPriority("Normal"); setShowJobForm(false); notify(settings.approvalRequired ? "Job queued for approval" : "Job assigned");
   };
   const sendMessage = async (event: FormEvent) => {
