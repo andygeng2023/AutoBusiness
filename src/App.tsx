@@ -401,6 +401,28 @@ export default function App() {
     if (error) { notify("Could not create goal: " + error.message); return; }
     setGoals((old) => [goal, ...old]); setGoalTitle(""); setGoalDescription(""); setGoalDueDate(""); setShowGoalForm(false); notify("Goal created");
   };
+  const createInvite = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!company || !user || !inviteEmail.trim()) return;
+    setInviteBusy(true);
+    try {
+      const random = crypto.getRandomValues(new Uint8Array(32));
+      const token = Array.from(random).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+      const tokenHash = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      const { error } = await supabase.from("company_invites").insert({
+        company_id: company.id, invited_email: inviteEmail.trim().toLowerCase(), role: inviteRole,
+        token_hash: tokenHash, created_by: user.id, expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+      });
+      if (error) throw error;
+      const url = new URL(import.meta.env.BASE_URL, window.location.origin);
+      url.searchParams.set("invite", token);
+      setInviteUrl(url.toString());
+      notify("Invitation link created. It expires in seven days.");
+    } catch (error) {
+      notify("Could not create invitation: " + (error instanceof Error ? error.message : "Unknown error"));
+    } finally { setInviteBusy(false); }
+  };
   const createEmployee = (event: FormEvent) => {
     event.preventDefault(); if (!employeeName.trim() || !employeeRole.trim()) return;
     const id = crypto.randomUUID();
