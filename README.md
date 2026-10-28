@@ -69,3 +69,14 @@ This is a Stage 1 foundation, not a finished autonomous-agent platform. Demo-mod
 - Demo mode stores these records in browser-local storage, isolated by company ID.
 
 **Security and capability boundary:** enabling an integration records permission only; it does not authenticate with the provider or establish an OAuth connection. This stage does not store provider secrets, execute browser automation, write to GitHub repositories, sync cloud drives, or publish externally. Those actions require secure server-side adapters, provider credentials, and explicit authorization. Never put provider tokens or Supabase service-role keys in frontend code.
+
+
+## Stage 6: Knowledge, approvals, and analytics
+
+- Company knowledge library for policies, procedures, research, decisions, and technical notes, with tags, search, archive, and CSV export.
+- Approval centre for reviewing pending publishing requests. Approval is recorded; external publishing remains unavailable until a provider adapter is configured.
+- Company analytics overview with operational counts for knowledge, deliverables, AI jobs, employees, pending approvals, and provider-reported AI costs.
+- CSV exports for AI job records, deliverables, approvals, employees, and knowledge items.
+- New RLS-protected `company_knowledge_items` table and supporting indexes.
+
+Analytics are operational summaries, not financial accounting. Missing provider cost data is not treated as zero-cost usage. Production use requires applying migration `0006_stage6_knowledge.sql`; demo mode uses browser-local data.
