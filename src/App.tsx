@@ -34,6 +34,14 @@ const seedEmployees: Employee[] = [
 const defaultSettings: Settings = { approvalRequired: true, dailyLimit: 50, monthlyLimit: 900, autoRun: false, connectors: ["Puter AI", "Supabase"] };
 const initials = (name: string) => name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 const nowTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const describeError = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
+    const value = error as { message: string; code?: string; details?: string; hint?: string };
+    return [value.message, value.code ? `(${value.code})` : "", value.details || "", value.hint ? `Hint: ${value.hint}` : ""].filter(Boolean).join(" ");
+  }
+  return fallback;
+};
 declare global { interface Window { puter?: { ai?: { chat: (prompt: string, options?: Record<string, unknown>) => Promise<unknown> } } } }
 
 export default function App() {
@@ -368,11 +376,17 @@ export default function App() {
   const deleteJob = async (jobId: string) => { if (company) { const { error } = await supabase.from("jobs").delete().eq("id", jobId).eq("company_id", company.id); if (error) { notify("Could not delete job: " + error.message); return; } } setJobs((old) => old.filter((j) => j.id !== jobId)); setSelectedJobId((current) => current === jobId ? null : current); notify("Job deleted"); };
   const createCompany = async (event: FormEvent) => {
     event.preventDefault();
-    if (!companyName.trim() || !user) return;
+    if (!companyName.trim()) return;
     setAuthBusy(true);
     try {
+      // Read the current authenticated identity immediately before the insert so the
+      // RLS ownership check uses the same user as the access token sent by Supabase.
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      const authenticatedUser = authData.user;
+      if (!authenticatedUser) throw new Error("Your session has expired. Sign in again before creating a workspace.");
       const name = companyName.trim();
-      const { data: created, error } = await supabase.from("companies").insert({ name, industry: "New workspace", created_by: user.id }).select("id,name,industry").single();
+      const { data: created, error } = await supabase.from("companies").insert({ name, industry: "New workspace", created_by: authenticatedUser.id }).select("id,name,industry").single();
       if (error) throw error;
       const companyId = created.id as string;
       const deptIds = new Map(seedDepts.map((dept) => [dept.id, crypto.randomUUID()]));
@@ -384,9 +398,9 @@ export default function App() {
       const { error: employeeError } = await supabase.from("employees").insert(employeeRows);
       if (employeeError) throw employeeError;
       const teamId = crypto.randomUUID();
-      const { error: convError } = await supabase.from("conversations").insert({ id: teamId, company_id: companyId, name: "Company team", kind: "group", created_by: user.id });
+      const { error: convError } = await supabase.from("conversations").insert({ id: teamId, company_id: companyId, name: "Company team", kind: "group", created_by: authenticatedUser.id });
       if (convError) throw convError;
-      const memberRows = [{ company_id: companyId, conversation_id: teamId, user_id: user.id, employee_id: null }, ...Array.from(employeeIds.values()).map((employeeId) => ({ company_id: companyId, conversation_id: teamId, user_id: null, employee_id: employeeId }))];
+      const memberRows = [{ company_id: companyId, conversation_id: teamId, user_id: authenticatedUser.id, employee_id: null }, ...Array.from(employeeIds.values()).map((employeeId) => ({ company_id: companyId, conversation_id: teamId, user_id: null, employee_id: employeeId }))];
       const { error: memberError } = await supabase.from("conversation_members").insert(memberRows);
       if (memberError) throw memberError;
       const item: Company = { id: companyId, name: created.name, industry: created.industry, initials: initials(created.name), color: "blue", description: "Shared cloud workspace" };
@@ -394,7 +408,7 @@ export default function App() {
       await openCompany(item);
       notify("Cloud workspace created");
     } catch (error) {
-      notify("Could not create workspace: " + (error instanceof Error ? error.message : "Unknown database error"));
+      notify("Could not create workspace: " + describeError(error, "Unknown database error"));
     } finally { setAuthBusy(false); }
   };
   const createGoal = async (event: FormEvent) => {
