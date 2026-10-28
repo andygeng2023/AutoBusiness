@@ -212,9 +212,10 @@ export default function App() {
         supabase.from("messages").select("*").eq("company_id", item.id).order("created_at"),
         supabase.from("conversation_members").select("*").eq("company_id", item.id),
         supabase.from("workspace_settings").select("*").eq("company_id", item.id).maybeSingle(),
-        supabase.from("goals").select("*").eq("company_id", item.id).order("created_at", { ascending: false })
+        supabase.from("goals").select("*").eq("company_id", item.id).order("created_at", { ascending: false }),
+        supabase.from("company_members").select("role").eq("company_id", item.id).eq("user_id", user?.id ?? "").maybeSingle()
       ]);
-      const error = [deptRes, employeeRes, jobRes, convRes, messageRes, memberRes, settingsRes, goalRes].find((result) => result.error)?.error;
+      const error = [deptRes, employeeRes, jobRes, convRes, messageRes, memberRes, settingsRes, goalRes, roleRes].find((result) => result.error)?.error;
       if (error) throw error;
       const departmentRows = deptRes.data ?? [];
       const employeeRows = employeeRes.data ?? [];
@@ -252,7 +253,8 @@ export default function App() {
         dailyLimit: dbSettings.daily_usage_limit, monthlyLimit: dbSettings.monthly_usage_limit,
         connectors: Array.from(new Set([...(dbSettings.enabled_connectors ?? ["puter"]).map((name: string) => (({ puter: "Puter AI", github: "GitHub", supabase: "Supabase", google_drive: "Google Drive", slack: "Slack", web_search: "Web search" } as Record<string, string>)[name] ?? name)), "Supabase"]))
       } : defaultSettings);
-      setGoals((goalRes.data ?? []).map((row: any) => ({ id: row.id, title: row.title, description: row.description, progress: Number(row.progress), dueDate: row.due_date ?? undefined, status: row.status })));\n      setMemberRole(roleRes.data?.role ?? "member");
+      setGoals((goalRes.data ?? []).map((row: any) => ({ id: row.id, title: row.title, description: row.description, progress: Number(row.progress), dueDate: row.due_date ?? undefined, status: row.status })));
+      setMemberRole(roleRes.data?.role ?? "member");
       setSelectedEmployee(nextEmployees[0]?.id ?? "");
       setJobEmployee(nextEmployees[0]?.id ?? "");
       setNewEmployeeDept(departmentRows[0]?.id ?? "");
