@@ -10,11 +10,11 @@ import { supabase } from "./supabase";
 
 type Employee = { id: string; name: string; role: string; deptId: string; tone: string; model: string; instructions: string; status: "Available" | "Working" | "Needs review" | "Paused"; task?: string };
 type Dept = { id: string; name: string; parentId?: string };
-type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string };
+type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string; reviewedBy?: string };
 type Message = { id: string; from: string; text: string; time: string; jobId?: string; createdAt?: string; senderUserId?: string };
 type Conversation = { id: string; name: string; kind: "private" | "group"; members: string[]; messages: Message[]; createdBy?: string };
 type Company = { id: string; name: string; industry: string; initials: string; color: string; description: string };
-type Goal = { id: string; title: string; description: string; progress: number; dueDate?: string; status: "planned" | "active" | "paused" | "completed" };
+type Goal = { id: string; title: string; description: string; progress: number; dueDate?: string; status: "planned" | "active" | "paused" | "completed"; createdBy?: string };
 type AuthUser = { id: string; email?: string };
 type Settings = { approvalRequired: boolean; dailyLimit: number; monthlyLimit: number; autoRun: boolean; connectors: string[] };
 
@@ -134,7 +134,7 @@ export default function App() {
   useEffect(() => {
     if (!user || !company || loadedCompanyId !== company.id) return;
     const companyId = company.id;
-    void supabase.from("jobs").upsert(jobs.map((j) => ({ id: j.id, company_id: companyId, employee_id: j.employeeId || null, title: j.title, description: j.description ?? "", status: j.status.toLowerCase().replace(" ", "_"), priority: j.priority.toLowerCase(), result: j.result ?? "", created_by: j.createdBy ?? user.id, reviewed_by: j.status === "Approved" ? user.id : null, created_at: j.created && !Number.isNaN(Date.parse(j.created)) ? new Date(j.created).toISOString() : new Date().toISOString(), submitted_at: j.submittedAt ? (Number.isNaN(Date.parse(j.submittedAt)) ? new Date().toISOString() : new Date(j.submittedAt).toISOString()) : null, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && jobs.length) notify("Job save failed: " + error.message); });
+    void supabase.from("jobs").upsert(jobs.map((j) => ({ id: j.id, company_id: companyId, employee_id: j.employeeId || null, title: j.title, description: j.description ?? "", status: j.status.toLowerCase().replace(" ", "_"), priority: j.priority.toLowerCase(), result: j.result ?? "", created_by: j.createdBy ?? user.id, reviewed_by: j.reviewedBy ?? (j.status === "Approved" ? user.id : null), created_at: j.created && !Number.isNaN(Date.parse(j.created)) ? new Date(j.created).toISOString() : new Date().toISOString(), submitted_at: j.submittedAt ? (Number.isNaN(Date.parse(j.submittedAt)) ? new Date().toISOString() : new Date(j.submittedAt).toISOString()) : null, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && jobs.length) notify("Job save failed: " + error.message); });
   }, [jobs, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (!user || !company || loadedCompanyId !== company.id) return;
@@ -153,7 +153,7 @@ export default function App() {
   }, [settings, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (!user || !company || loadedCompanyId !== company.id) return;
-    void supabase.from("goals").upsert(goals.map((g) => ({ id: g.id, company_id: company.id, title: g.title, description: g.description, progress: g.progress, due_date: g.dueDate || null, status: g.status, created_by: user.id, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && goals.length) notify("Goal save failed: " + error.message); });
+    void supabase.from("goals").upsert(goals.map((g) => ({ id: g.id, company_id: company.id, title: g.title, description: g.description, progress: g.progress, due_date: g.dueDate || null, status: g.status, created_by: g.createdBy ?? user.id, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && goals.length) notify("Goal save failed: " + error.message); });
   }, [goals, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (!user || !company || loadedCompanyId !== company.id) return;
@@ -237,7 +237,7 @@ export default function App() {
         priority: row.priority === "urgent" || row.priority === "high" ? "Urgent" : "Normal",
         created: new Date(row.created_at).toLocaleString(), result: row.result || undefined,
         submittedAt: row.submitted_at ?? undefined,
-        createdBy: row.created_by
+        createdBy: row.created_by, reviewedBy: row.reviewed_by ?? undefined
       })));
       setConversations(conversationRows.map((row: any) => ({
         id: row.id, name: row.name, kind: row.kind,
@@ -255,7 +255,7 @@ export default function App() {
         dailyLimit: dbSettings.daily_usage_limit, monthlyLimit: dbSettings.monthly_usage_limit,
         connectors: Array.from(new Set([...(dbSettings.enabled_connectors ?? ["puter"]).map((name: string) => (({ puter: "Puter AI", github: "GitHub", supabase: "Supabase", google_drive: "Google Drive", slack: "Slack", web_search: "Web search" } as Record<string, string>)[name] ?? name)), "Supabase"]))
       } : defaultSettings);
-      setGoals((goalRes.data ?? []).map((row: any) => ({ id: row.id, title: row.title, description: row.description, progress: Number(row.progress), dueDate: row.due_date ?? undefined, status: row.status })));
+      setGoals((goalRes.data ?? []).map((row: any) => ({ id: row.id, title: row.title, description: row.description, progress: Number(row.progress), dueDate: row.due_date ?? undefined, status: row.status, createdBy: row.created_by })));
       setMemberRole(roleRes.data?.role ?? "member");
       setSelectedEmployee(nextEmployees[0]?.id ?? "");
       setJobEmployee(nextEmployees[0]?.id ?? "");
@@ -362,7 +362,7 @@ export default function App() {
       notify(error instanceof Error ? error.message : "Could not execute this job");
     } finally { setBusy(false); }
   };
-  const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "" } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
+  const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
   const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress" } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
   const requestRevision = (jobId: string) => { if (!reviewNote.trim()) { notify("Add a note explaining what needs to change"); return; } setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Rejected", reviewNote: reviewNote.trim() } : j)); notify("Revision requested — feedback saved to the job"); };
   const deleteJob = async (jobId: string) => { if (company) { const { error } = await supabase.from("jobs").delete().eq("id", jobId).eq("company_id", company.id); if (error) { notify("Could not delete job: " + error.message); return; } } setJobs((old) => old.filter((j) => j.id !== jobId)); setSelectedJobId((current) => current === jobId ? null : current); notify("Job deleted"); };
@@ -400,7 +400,7 @@ export default function App() {
   const createGoal = async (event: FormEvent) => {
     event.preventDefault();
     if (!company || !user || !goalTitle.trim()) return;
-    const goal: Goal = { id: crypto.randomUUID(), title: goalTitle.trim(), description: goalDescription.trim(), progress: 0, dueDate: goalDueDate || undefined, status: "active" };
+    const goal: Goal = { id: crypto.randomUUID(), title: goalTitle.trim(), description: goalDescription.trim(), progress: 0, dueDate: goalDueDate || undefined, status: "active", createdBy: user.id };
     const { error } = await supabase.from("goals").insert({ id: goal.id, company_id: company.id, title: goal.title, description: goal.description, progress: 0, due_date: goal.dueDate ?? null, status: goal.status, created_by: user.id });
     if (error) { notify("Could not create goal: " + error.message); return; }
     setGoals((old) => [goal, ...old]); setGoalTitle(""); setGoalDescription(""); setGoalDueDate(""); setShowGoalForm(false); notify("Goal created");
@@ -553,7 +553,7 @@ export default function App() {
           </div>
           <div className="dashboard-grid">
             <section className="panel jobs-panel"><div className="panel-heading"><div><h2>Jobs & requests</h2><p>Keep an eye on what needs attention.</p></div><button className="text-button" onClick={() => changePage("Jobs & approvals")}>View all <ArrowUpRight size={14} /></button></div>
-              <div className="job-list">{jobs.slice(0, 4).map((job) => { const emp = employeeMap.get(job.employeeId); return <div className="job-row" key={job.id}><span className="avatar">{initials(emp?.name ?? "AI")}</span><div className="job-copy"><strong>{job.title}</strong><span>{emp?.name ?? "Unassigned"} <span className="dot-sep">·</span> {job.created}</span></div><span className={"job-status " + job.status.toLowerCase().replace(" ", "-")}>{job.status}</span>{job.status === "Submitted" && <button className="secondary-button compact-button" onClick={() => setSelectedJobId(job.id)}>View work</button>}</div>; })}</div>
+              <div className="job-list">{jobs.slice(0, 4).map((job) => { const emp = employeeMap.get(job.employeeId); return <div className="job-row" key={job.id}><span className="avatar">{initials(emp?.name ?? "AI")}</span><div className="job-copy"><strong>{job.title}</strong><span>{emp?.name ?? "Unassigned"} <span className="dot-sep">·</span> {new Date(job.created).toLocaleString()}</span></div><span className={"job-status " + job.status.toLowerCase().replace(" ", "-")}>{job.status}</span>{job.status === "Submitted" && <button className="secondary-button compact-button" onClick={() => setSelectedJobId(job.id)}>View work</button>}</div>; })}</div>
               {jobs.length === 0 && <div className="empty-state">No jobs yet. Assign your first task to get started.</div>}
               <button className="panel-footer-link" onClick={() => setShowJobForm(true)}><Plus size={15} /> Create a new job</button>
             </section>
@@ -561,7 +561,7 @@ export default function App() {
               <div className="team-list">{employees.slice(0, 5).map((e) => <button className="team-person" key={e.id} onClick={() => { setSelectedEmployee(e.id); setPage("Employees"); }}><span className="avatar">{initials(e.name)}</span><span className="team-person-copy"><strong>{e.name}</strong><small>{e.role}</small></span><span className={"presence " + e.status.toLowerCase().replace(" ", "-")}><i />{e.status}</span></button>)}</div>
             </section>
             <section className="panel goals-panel"><div className="panel-heading"><div><h2>Goals & progress</h2><p>Live goals saved to this workspace.</p></div><button className="icon-button subtle" onClick={() => setShowGoalForm(true)} title="Add goal"><Plus size={17} /></button></div>{goals.map((goal) => <div className="goal-item" key={goal.id}><div className="goal-top"><span className="goal-mark purple-mark"><ArrowUpRight size={14} /></span><div><strong>{goal.title}</strong><small>{goal.dueDate ? "Due " + goal.dueDate : goal.status}</small></div><b>{Math.round(goal.progress)}%</b></div><div className="goal-progress"><span style={{ width: goal.progress + "%" }} /></div><input className="goal-progress-input" type="range" min="0" max="100" step="5" value={goal.progress} aria-label={"Progress for " + goal.title} onChange={(e) => { const progress = Number(e.target.value); setGoals((old) => old.map((g) => g.id === goal.id ? { ...g, progress, status: progress === 100 ? "completed" : "active" } : g)); }} /></div>)}{goals.length === 0 && <div className="empty-state"><strong>No goals yet</strong><p>Add a measurable goal to track progress here.</p></div>}<button className="panel-footer-link" onClick={() => setShowGoalForm(true)}><Plus size={15} /> Add a goal</button></section>
-            <section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Recent job updates from this workspace.</p></div><Clock3 size={16} className="muted-icon" /></div><div className="activity-list">{jobs.slice(0, 4).map((job) => <div className="activity-item" key={job.id}><span className="activity-bullet violet-bullet">{job.status === "Approved" ? <CheckCheck size={13} /> : <Inbox size={13} />}</span><div><p><strong>{job.title}</strong> · {job.status.toLowerCase()}</p><small>{job.created}</small></div></div>)}{jobs.length === 0 && <div className="empty-state">Job activity will appear here when you assign work.</div>}</div></section>
+            <section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Recent job updates from this workspace.</p></div><Clock3 size={16} className="muted-icon" /></div><div className="activity-list">{jobs.slice(0, 4).map((job) => <div className="activity-item" key={job.id}><span className="activity-bullet violet-bullet">{job.status === "Approved" ? <CheckCheck size={13} /> : <Inbox size={13} />}</span><div><p><strong>{job.title}</strong> · {job.status.toLowerCase()}</p><small>{new Date(job.created).toLocaleString()}</small></div></div>)}{jobs.length === 0 && <div className="empty-state">Job activity will appear here when you assign work.</div>}</div></section>
           </div>
         </div>}
         {page === "Employees" && <div className="page-wrap employees-page">
