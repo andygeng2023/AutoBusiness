@@ -280,7 +280,7 @@ export default function App() {
       setLoadingWorkspace(false);
     }
   };
-  const changePage = (next: string) => { setPage(next); if (next === "Communication") setSelectedChat("team"); };
+  const changePage = (next: string) => { setPage(next); if (next === "Communication") setSelectedChat(conversations.find((c) => c.kind === "group")?.id ?? conversations[0]?.id ?? ""); };
   const createJob = (event: FormEvent) => {
     event.preventDefault();
     if (!jobTitle.trim() || !company || !user || !jobEmployee) { notify("Create an employee before assigning a job"); return; }
@@ -478,8 +478,8 @@ export default function App() {
         <div className="sidebar-divider" />
         {page === "Communication" ? <>
           <div className="side-section-head"><span>MESSAGES</span><button className="tiny-icon" onClick={() => setShowChatForm(true)} title="New chat"><Plus size={15} /></button></div>
-          <button className={"chat-list-item " + (selectedChat === "team" ? "chosen" : "")} onClick={() => setSelectedChat("team")}><span className="chat-avatar team-avatar"><Users size={15} /></span><span className="chat-label"><strong>Company team</strong><small>Group conversation</small></span></button>
-          {conversations.filter((c) => c.id !== "team").map((c) => <button key={c.id} className={"chat-list-item " + (selectedChat === c.id ? "chosen" : "")} onClick={() => setSelectedChat(c.id)}><span className="avatar tiny">{initials(c.name)}</span><span className="chat-label"><strong>{c.name}</strong><small>{c.messages.at(-1)?.text ?? "Start a conversation"}</small></span></button>)}
+          {conversations.filter((c) => c.kind === "group").map((c) => <button key={c.id} className={"chat-list-item " + (selectedChat === c.id ? "chosen" : "")} onClick={() => setSelectedChat(c.id)}><span className="chat-avatar team-avatar"><Users size={15} /></span><span className="chat-label"><strong>{c.name}</strong><small>Group conversation</small></span></button>)}
+          {conversations.filter((c) => c.kind !== "group").map((c) => <button key={c.id} className={"chat-list-item " + (selectedChat === c.id ? "chosen" : "")} onClick={() => setSelectedChat(c.id)}><span className="avatar tiny">{initials(c.name)}</span><span className="chat-label"><strong>{c.name}</strong><small>{c.messages.at(-1)?.text ?? "Start a conversation"}</small></span></button>)}
           <button className="side-new-button" onClick={() => setShowChatForm(true)}><Plus size={14} /> New conversation</button>
         </> : page === "Employees" ? <>
           <div className="side-section-head"><span>YOUR TEAM</span><button className="tiny-icon" onClick={() => setShowEmployeeForm(true)} title="Add employee"><Plus size={15} /></button></div>
@@ -491,7 +491,7 @@ export default function App() {
         </> : <>
           <div className="side-section-head"><span>QUICK ACCESS</span></div>
           <button className="quick-link" onClick={() => changePage("Jobs & approvals")}><Inbox size={15} /><span>Needs your review</span><span className="nav-count">{jobs.filter((j) => j.status === "Submitted").length}</span></button>
-          <button className="quick-link" onClick={() => { setSelectedChat("team"); changePage("Communication"); }}><MessageCircle size={15} /><span>Team messages</span></button>
+          <button className="quick-link" onClick={() => changePage("Communication")}><MessageCircle size={15} /><span>Team messages</span></button>
           <div className="side-card"><div className="side-card-icon"><Zap size={15} /></div><strong>Your AI team</strong><p>Delegate work, review submissions, and keep everything moving.</p><button onClick={() => setShowJobForm(true)}>Assign a job <ArrowUpRight size={13} /></button></div>
         </>}
         <div className="sidebar-bottom"><div className="usage-mini"><div className="usage-mini-top"><span>JOB COMPLETION</span><span>{jobs.filter((j) => j.status === "Approved").length} / {jobs.length}</span></div><div className="usage-track"><span style={{ width: (jobs.length ? jobs.filter((j) => j.status === "Approved").length / jobs.length * 100 : 0) + "%" }} /></div><small>Approved jobs in this workspace</small></div><button className="sidebar-company" onClick={() => setCompany(null)}><span className={"company-mini " + company.color}>{company.initials}</span><span><strong>{company.name}</strong><small>Free workspace</small></span><MoreHorizontal size={17} /></button></div>
