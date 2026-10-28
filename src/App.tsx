@@ -414,19 +414,39 @@ export default function App() {
     </div>];
   });
 
+  if (authLoading) return <div className="home-shell auth-loading"><div className="brand"><span className="brand-mark"><Command size={19} /></span><span>autobusiness</span></div><p>Connecting securely to your workspace…</p></div>;
+  if (!user) return <div className="home-shell">
+    <header className="home-top"><div className="brand"><span className="brand-mark"><Command size={19} /></span><span>autobusiness</span></div><span className="workspace-chip"><LockKeyhole size={14} /> Secure sign-in</span></header>
+    <main className="auth-content">
+      <div className="auth-card">
+        <div className="eyebrow"><ShieldCheck size={14} /> PRIVATE COMPANY WORKSPACES</div>
+        <h1>{authMode === "signin" ? "Welcome back." : "Create your account."}</h1>
+        <p className="home-subtitle">{authMode === "signin" ? "Sign in to access your companies and shared work." : "Create an account to set up your first cloud workspace."}</p>
+        <form className="auth-form" onSubmit={handleAuthSubmit}>
+          <label>Email address<input type="email" autoComplete="email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="you@company.com" required /></label>
+          <label>Password<input type="password" autoComplete={authMode === "signin" ? "current-password" : "new-password"} minLength={8} value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="At least 8 characters" required /></label>
+          {authError && <p className="auth-error" role="alert">{authError}</p>}
+          {authNotice && <p className="auth-notice" role="status">{authNotice}</p>}
+          <button className="primary-button auth-submit" type="submit" disabled={authBusy}>{authBusy ? "Please wait…" : authMode === "signin" ? "Sign in" : "Create account"}</button>
+        </form>
+        <p className="auth-switch">{authMode === "signin" ? "New to AutoBusiness?" : "Already have an account?"} <button type="button" onClick={() => { setAuthMode(authMode === "signin" ? "signup" : "signin"); setAuthError(""); setAuthNotice(""); }}>{authMode === "signin" ? "Create an account" : "Sign in instead"}</button></p>
+        <div className="auth-security-note"><LockKeyhole size={14} /> Your company data is stored in Supabase and protected by company membership policies.</div>
+      </div>
+    </main>
+  </div>;
   if (!company) return <div className="home-shell">
     <header className="home-top"><div className="brand"><span className="brand-mark"><Command size={19} /></span><span>autobusiness</span></div><span className="workspace-chip"><span className="online-dot" /> Your workspace</span></header>
     <main className="home-content">
       <div className="eyebrow"><Sparkles size={14} /> YOUR AI OPERATING TEAM</div>
       <h1>Good work starts<br />with the right team.</h1>
-      <p className="home-subtitle">Choose a company workspace to pick up where you left off.</p>
+      <p className="home-subtitle">Choose a shared cloud workspace or create a new company.</p>
       <div className="company-grid">
-        {companies.map((c) => <button className="company-card" key={c.id} onClick={() => { openCompany(c); }}>
-          <div className={"company-icon " + c.color}>{c.initials}</div><div className="company-card-top"><strong>{c.name}</strong><ChevronRight size={17} /></div><span className="company-industry">{c.industry}</span><p>{c.description}</p><div className="company-card-footer"><span><Users size={14} /> {employees.length} employees</span><span className="workspace-open">Open workspace <ArrowUpRight size={14} /></span></div>
+        {companies.map((c) => <button className="company-card" key={c.id} onClick={() => { void openCompany(c); }}>
+          <div className={"company-icon " + c.color}>{c.initials}</div><div className="company-card-top"><strong>{c.name}</strong><ChevronRight size={17} /></div><span className="company-industry">{c.industry}</span><p>{c.description}</p><div className="company-card-footer"><span><LockKeyhole size={13} /> Cloud saved</span><span className="workspace-open">Open workspace <ArrowUpRight size={14} /></span></div>
         </button>)}
-        <button className="company-card add-company" onClick={() => setShowCompanyForm(true)}><span className="add-circle"><Plus size={20} /></span><strong>Create a company</strong><p>Start a new workspace for another business.</p></button>
+        {loadingCompanies && <div className="empty-state">Loading your companies…</div>}{!loadingCompanies && companies.length === 0 && <div className="empty-state company-empty"><strong>No company workspaces yet</strong><p>Create your first workspace to start building your AI team.</p></div>}<button className="company-card add-company" onClick={() => setShowCompanyForm(true)}><span className="add-circle"><Plus size={20} /></span><strong>Create a company</strong><p>Start a new workspace for another business.</p></button>
       </div>
-      <div className="home-footnote"><LockKeyhole size={13} /> Company workspaces are kept separate. Demo data is saved in this browser.</div>
+      <div className="home-footnote"><LockKeyhole size={13} /> Signed in as {user.email ?? "your account"} · Company data is saved to Supabase.</div><button className="auth-signout-link" onClick={() => void signOut()}>Sign out</button>
     </main>
     {showCompanyForm && <div className="modal-backdrop" onClick={() => setShowCompanyForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createCompany}><button type="button" className="modal-close" onClick={() => setShowCompanyForm(false)}>×</button><h2>Create a company</h2><p>Give your workspace a name to get started.</p><label>Company name<input autoFocus value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="e.g. Northstar Studio" required /></label><button className="primary-button" type="submit">Create workspace</button></form></div>}
   </div>;
