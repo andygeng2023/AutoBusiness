@@ -4,7 +4,7 @@ import { supabase } from './lib/supabase';
 import { puterChat } from './lib/puter';
 
 type Employee={id:string;full_name:string;role_title:string;employment_type:'human'|'ai';status:string};
-type Job={id:string;company_id:string;employee_id:string;requested_by:string;goal:string;status:'queued'|'awaiting_approval'|'running'|'succeeded'|'retry_wait'|'failed'|'cancelled';priority:number;scheduled_at:string;attempts:number;max_attempts:number;last_error:string;result_summary:string;estimated_cost_usd:number;actual_cost_usd:number;created_at:string};
+type Job={id:string;company_id:string;employee_id:string;requested_by:string;goal:string;status:'queued'|'awaiting_approval'|'running'|'succeeded'|'retry_wait'|'failed'|'cancelled';priority:number;scheduled_at:string;attempts:number;max_attempts:number;last_error:string;result_summary:string;estimated_cost_usd:number;actual_cost_usd:number;created_at:string;updated_at?:string;approved_by?:string|null;approved_at?:string|null;started_at?:string|null;finished_at?:string|null};
 type Budget={monthly_limit_usd:number;require_approval:boolean;max_attempts:number};
 const LOCAL='autobusiness-stage4-jobs-v1';
 const DEFAULT_BUDGET:Budget={monthly_limit_usd:25,require_approval:true,max_attempts:3};
