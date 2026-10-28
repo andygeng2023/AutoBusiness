@@ -90,3 +90,13 @@ Analytics are operational summaries, not financial accounting. Missing provider 
 - Demo mode stores automation rules, run history, and demo-created tasks in browser-local storage.
 
 **Execution boundary:** this stage runs only when a member clicks Run now. Scheduled jobs, event-driven triggers, external integrations, and background workers are not implemented. Apply `0007_stage7_automation_studio.sql` before using the feature with Supabase.
+
+
+## Stage 8: Goals and KPIs
+
+- Company-scoped measurable goals with metric name, unit, baseline, current value, target, and optional due date.
+- Progress calculation, goal status management, and company summary metrics.
+- Row-level security for reads and member updates; owner/admin deletion policy.
+- Browser-local demo mode and Supabase-backed production records.
+
+Apply migration `0008_stage8_goals_kpis.sql` before using this feature with Supabase. Progress is an operational indicator based on baseline-to-target ratio, not a financial accounting or HR assessment.
