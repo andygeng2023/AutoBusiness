@@ -163,7 +163,7 @@ export default function App() {
   }, [conversations, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (!user || !company || loadedCompanyId !== company.id) return;
-    void supabase.from("workspace_settings").upsert({ company_id: company.id, approval_required: settings.approvalRequired, auto_run: settings.autoRun, daily_usage_limit: settings.dailyLimit, monthly_usage_limit: settings.monthlyLimit, enabled_connectors: settings.connectors.map((c) => ({ "Puter AI": "puter", "Google Drive": "google_drive", "Web search": "web_search" }[c] ?? c.toLowerCase().replaceAll(" ", "_"))) }, { onConflict: "company_id" }).then(({ error }) => { if (error) notify("Settings save failed: " + error.message); });
+    void supabase.from("workspace_settings").upsert({ company_id: company.id, approval_required: settings.approvalRequired, auto_run: settings.autoRun, daily_usage_limit: settings.dailyLimit, monthly_usage_limit: settings.monthlyLimit, enabled_connectors: settings.connectors.map((c) => (({ "Puter AI": "puter", "Google Drive": "google_drive", "Web search": "web_search" } as Record<string, string>)[c] ?? c.toLowerCase().replaceAll(" ", "_"))) }, { onConflict: "company_id" }).then(({ error }) => { if (error) notify("Settings save failed: " + error.message); });
   }, [settings, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (!user || !company || loadedCompanyId !== company.id) return;
@@ -266,11 +266,12 @@ export default function App() {
       setSettings(dbSettings ? {
         approvalRequired: dbSettings.approval_required, autoRun: dbSettings.auto_run,
         dailyLimit: dbSettings.daily_usage_limit, monthlyLimit: dbSettings.monthly_usage_limit,
-        connectors: (dbSettings.enabled_connectors ?? ["puter"]).map((name: string) => ({ puter: "Puter AI", github: "GitHub", supabase: "Supabase", google_drive: "Google Drive", slack: "Slack", web_search: "Web search" }[name] ?? name))
+        connectors: (dbSettings.enabled_connectors ?? ["puter"]).map((name: string) => (({ puter: "Puter AI", github: "GitHub", supabase: "Supabase", google_drive: "Google Drive", slack: "Slack", web_search: "Web search" } as Record<string, string>)[name] ?? name))
       } : defaultSettings);
       setGoals((goalRes.data ?? []).map((row: any) => ({ id: row.id, title: row.title, description: row.description, progress: Number(row.progress), dueDate: row.due_date ?? undefined, status: row.status })));
       setSelectedEmployee(nextEmployees[0]?.id ?? "");
       setJobEmployee(nextEmployees[0]?.id ?? "");
+      setNewEmployeeDept(departmentRows[0]?.id ?? "");
       setSelectedChat(conversationRows[0]?.id ?? "");
       setLoadedCompanyId(item.id);
     } catch (error) {
@@ -331,7 +332,7 @@ export default function App() {
       if (!output.trim()) throw new Error("The AI provider returned an empty deliverable.");
       setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Submitted", result: output, submittedAt: nowTime() } : j));
       setEmployees((old) => old.map((e) => e.id === emp.id ? { ...e, status: "Needs review", task: job.title } : e));
-      setConversations((old) => old.map((c) => c.id === "team" ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: emp.id, text: "I’ve completed the deliverable for “" + job.title + "”. Open the job to inspect the actual work before approving it.", time: nowTime(), createdAt: new Date().toISOString(), jobId }] } : c));
+      setConversations((old) => old.map((c) => c.kind === "group" ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: emp.id, text: "I’ve completed the deliverable for “" + job.title + "”. Open the job to inspect the actual work before approving it.", time: nowTime(), createdAt: new Date().toISOString(), jobId }] } : c));
       setSelectedJobId(jobId);
       notify("Deliverable created — review the work");
     } catch (error) {
@@ -468,7 +469,7 @@ export default function App() {
   if (loadingWorkspace && company) return <div className="home-shell auth-loading"><div className="brand"><span className="brand-mark"><Command size={19} /></span><span>autobusiness</span></div><p>Loading {company.name} from the cloud…</p></div>;
   return <div className="app-shell">
     <header className="app-topbar">
-      <div className="topbar-left"><button className="icon-button menu-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar"><Command size={18} /></button><div className="brand compact"><span className="brand-mark"><Command size={17} /></span><span>autobusiness</span></div><span className="topbar-divider" /><button className="company-switcher" onClick={() => setCompany(null)}><span className={"company-mini " + company.color}>{company.initials}</span>{company.name}<ChevronDown size={14} /></button></div>
+      <div className="topbar-left"><button className="icon-button menu-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar"><Command size={18} /></button><div className="brand compact"><span className="brand-mark"><Command size={17} /></span><span>autobusiness</span></div><span className="topbar-divider" /><button className="company-switcher" onClick={() => { setLoadedCompanyId(null); setCompany(null); }}><span className={"company-mini " + company.color}>{company.initials}</span>{company.name}<ChevronDown size={14} /></button></div>
       <div className="topbar-right"><span className="saved-indicator"><span className="online-dot" /> Supabase connected</span><button className="icon-button" title="Help" onClick={() => notify("Help centre coming soon")}><CircleHelp size={17} /></button><button className="profile-button" title={"Sign out " + (user?.email ?? "")} onClick={() => void signOut()}>{initials(user?.email?.split("@")[0] ?? "U")}</button></div>
     </header>
     <div className="app-body">
