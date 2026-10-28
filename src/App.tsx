@@ -139,7 +139,7 @@ export default function App() {
   useEffect(() => {
     if (!user || !company || loadedCompanyId !== company.id) return;
     const companyId = company.id;
-    const rows = conversations.flatMap((c) => c.messages.map((m) => ({
+    const rows = conversations.flatMap((c) => c.messages.filter((m) => m.from !== "teammate" && m.from !== "system").map((m) => ({
       id: m.id, company_id: companyId, conversation_id: c.id,
       sender_user_id: m.from === "you" ? user.id : m.senderUserId ?? null,
       sender_employee_id: m.from === "you" || m.senderUserId ? null : m.from,
