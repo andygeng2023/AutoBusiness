@@ -11,7 +11,7 @@ import { supabase } from "./supabase";
 type Employee = { id: string; name: string; role: string; deptId: string; tone: string; model: string; instructions: string; status: "Available" | "Working" | "Needs review" | "Paused"; task?: string };
 type Dept = { id: string; name: string; parentId?: string };
 type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string };
-type Message = { id: string; from: string; text: string; time: string; jobId?: string; createdAt?: string };
+type Message = { id: string; from: string; text: string; time: string; jobId?: string; createdAt?: string; senderUserId?: string };
 type Conversation = { id: string; name: string; kind: "private" | "group"; members: string[]; messages: Message[]; createdBy?: string };
 type Company = { id: string; name: string; industry: string; initials: string; color: string; description: string };
 type Goal = { id: string; title: string; description: string; progress: number; dueDate?: string; status: "planned" | "active" | "paused" | "completed" };
@@ -139,11 +139,13 @@ export default function App() {
   useEffect(() => {
     if (!user || !company || loadedCompanyId !== company.id) return;
     const companyId = company.id;
-    void supabase.from("conversations").upsert(conversations.map((c) => ({ id: c.id, company_id: companyId, name: c.name, kind: c.kind, created_by: c.createdBy ?? user.id })), { onConflict: "id" }).then(async ({ error }) => {
-      if (error) { if (conversations.length) notify("Conversation save failed: " + error.message); return; }
-      const rows = conversations.flatMap((c) => c.messages.map((m) => ({ id: m.id, company_id: companyId, conversation_id: c.id, sender_user_id: m.from === "you" ? user.id : null, sender_employee_id: m.from === "you" ? null : m.from, body: m.text, job_id: m.jobId ?? null, created_at: m.createdAt ?? new Date().toISOString() })));
-      if (rows.length) { const result = await supabase.from("messages").upsert(rows, { onConflict: "id" }); if (result.error) notify("Message save failed: " + result.error.message); }
-    });
+    const rows = conversations.flatMap((c) => c.messages.map((m) => ({
+      id: m.id, company_id: companyId, conversation_id: c.id,
+      sender_user_id: m.from === "you" ? user.id : m.senderUserId ?? null,
+      sender_employee_id: m.from === "you" || m.senderUserId ? null : m.from,
+      body: m.text, job_id: m.jobId ?? null, created_at: m.createdAt ?? new Date().toISOString()
+    })));
+    if (rows.length) void supabase.from("messages").upsert(rows, { onConflict: "id", ignoreDuplicates: true }).then(({ error }) => { if (error) notify("Message save failed: " + error.message); });
   }, [conversations, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (!user || !company || loadedCompanyId !== company.id) return;
@@ -242,8 +244,8 @@ export default function App() {
         createdBy: row.created_by,
         members: memberRows.filter((member: any) => member.conversation_id === row.id && member.employee_id).map((member: any) => member.employee_id),
         messages: messageRows.filter((message: any) => message.conversation_id === row.id).map((message: any) => ({
-          id: message.id, from: message.sender_user_id ? (message.sender_user_id === user?.id ? "you" : "system") : message.sender_employee_id ?? "system",
-          text: message.body, time: new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          id: message.id, from: message.sender_user_id ? (message.sender_user_id === user?.id ? "you" : "teammate") : message.sender_employee_id ?? "system",
+          senderUserId: message.sender_user_id ?? undefined, text: message.body, time: new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           createdAt: message.created_at, jobId: message.job_id ?? undefined
         }))
       })));
@@ -459,7 +461,7 @@ export default function App() {
     }
     setPage("Communication");
   };
-  const employeeNameFor = (id: string) => id === "you" ? "You" : employeeMap.get(id)?.name ?? "AutoBusiness";
+  const employeeNameFor = (id: string) => id === "you" ? "You" : id === "teammate" ? "Teammate" : employeeMap.get(id)?.name ?? "AutoBusiness";
   const filteredEmployees = employees.filter((e) => (e.name + " " + e.role).toLowerCase().includes(search.toLowerCase()));
   const departmentTree = (parent?: string, depth = 0): JSX.Element[] => depts.filter((d) => d.parentId === parent).flatMap((d) => {
     const members = filteredEmployees.filter((e) => e.deptId === d.id);
