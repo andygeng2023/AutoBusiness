@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Check, CircleAlert, Clock3, LoaderCircle, Play, Plus, RefreshCw, RotateCcw, ShieldCheck, X } from 'lucide-react';
+import { Check, CircleAlert, LoaderCircle, Play, Plus, RefreshCw, RotateCcw, ShieldCheck, X } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { puterChat } from './lib/puter';
 
