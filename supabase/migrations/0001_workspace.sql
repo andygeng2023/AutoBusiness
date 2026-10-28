@@ -82,6 +82,7 @@ create table if not exists public.conversations (
 );
 
 create table if not exists public.conversation_members (
+  company_id uuid not null references public.companies(id) on delete cascade,
   conversation_id uuid not null references public.conversations(id) on delete cascade,
   user_id uuid references auth.users(id) on delete cascade,
   employee_id uuid references public.employees(id) on delete cascade,
