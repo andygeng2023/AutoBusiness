@@ -54,8 +54,18 @@ npm run build
 - Stage 2: employee profiles, departments, tasks, projects, assignments and shared knowledge.
 - Stage 3: Puter-powered agent execution with structured outputs and controlled tools.
 - Stage 4: durable orchestration, delegation, budgets, approvals and retries.
-- Later: integrations, publishing workflows, analytics and team administration.
+- Stage 5: company-scoped integration permissions, saved Markdown deliverables, and publishing approval workflows.
+- Later: secure OAuth/provider adapters, server-side browser automation, real repository operations, external document sync, automated publishing, analytics and team administration.
 
 ## Important limitations
 
 This is a Stage 1 foundation, not a finished autonomous-agent platform. Demo-mode data is local to one browser. Production multi-user operation requires Supabase configuration and the trusted onboarding flow described above. UI sections for later stages are placeholders by design.
+
+## Stage 5: Integrations and deliverables
+
+- Company-scoped integration permission records with admin-only management.
+- Saved company deliverables (documents, reports, research notes, implementation briefs, and publishing content), with Markdown export.
+- Publishing requests with an administrator approval trail and company-scoped row-level security.
+- Demo mode stores these records in browser-local storage, isolated by company ID.
+
+**Security and capability boundary:** enabling an integration records permission only; it does not authenticate with the provider or establish an OAuth connection. This stage does not store provider secrets, execute browser automation, write to GitHub repositories, sync cloud drives, or publish externally. Those actions require secure server-side adapters, provider credentials, and explicit authorization. Never put provider tokens or Supabase service-role keys in frontend code.
