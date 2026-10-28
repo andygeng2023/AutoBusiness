@@ -5,9 +5,9 @@ AutoBusiness is a multi-company workspace for configuring AI employees, assignin
 ## Current capabilities
 
 - Supabase email/password authentication with persistent sessions.
-- Company creation and membership-scoped company lists.
+- Company creation and membership-scoped company lists.\n- Owner/admin invitation links restricted to the invited email, hashed at rest, and expiring after seven days.
 - Cloud-backed departments, employees, job briefs, job results, review feedback, conversations, messages, workspace settings, and goals.
-- Row-level security for workspace data; unauthenticated access to workspace tables is revoked.
+- Row-level security for workspace data; unauthenticated access to workspace tables is revoked. Private employee conversations and their messages are limited to the creating member, while group chats are available to company members.
 - Real dashboard counts based on stored employee, job, deliverable, and goal records rather than seeded example metrics.
 - Goal creation and progress tracking saved to the company workspace.
 - Job assignment, deliverable generation through Puter.js, revision requests, and approval.
@@ -33,7 +33,7 @@ The app uses Supabase Auth email/password sign-in and account creation. If email
 
 The workspace database lives in Supabase project `wctlalaitdrzihvthvze`. The app uses the public publishable key from the browser and relies on Supabase Auth plus row-level security for access control. The creator of a company becomes its owner through the database trigger. Workspace data is shared across signed-in members who have company membership.
 
-The app currently loads shared data when a workspace is opened; live push updates between already-open browser sessions are not yet implemented. Refresh or reopen the workspace to load changes made by another user.
+The app currently loads shared data when a workspace is opened; live push updates between already-open browser sessions are not yet implemented. Refresh or reopen the workspace to load changes made by another user. Company owners and admins can invite teammates from Settings → General. Invite links are bound to the intended email address and expire after seven days.
 
 ## AI provider and limitations
 
