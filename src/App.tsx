@@ -71,7 +71,11 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [jobTitle, setJobTitle] = useState("");
-  const [jobDescription, setJobDescription] = useState("");\n  const [jobPriority, setJobPriority] = useState<"Normal" | "Urgent">("Normal");\n  const [jobSearch, setJobSearch] = useState("");\n  const [jobStatusFilter, setJobStatusFilter] = useState("All statuses");\n  const [reviewNote, setReviewNote] = useState("");
+  const [jobDescription, setJobDescription] = useState("");
+  const [jobPriority, setJobPriority] = useState<"Normal" | "Urgent">("Normal");
+  const [jobSearch, setJobSearch] = useState("");
+  const [jobStatusFilter, setJobStatusFilter] = useState("All statuses");
+  const [reviewNote, setReviewNote] = useState("");
   const [jobEmployee, setJobEmployee] = useState("maya");
   const [showJobForm, setShowJobForm] = useState(false);
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
