@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Activity, ArrowDownRight, ArrowUpRight, Bot, Building2, Check, ChevronDown,
   CircleHelp, Command, CreditCard, FileText, FolderKanban, LayoutDashboard,
-  LogOut, Menu, Plus, Search, Settings2, ShieldCheck, Sparkles, Users, Workflow, X,
+  LogOut, Menu, Plus, Search, Settings2, ShieldCheck, Sparkles, Target, Users, Workflow, X,
 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import { INDUSTRIES, makeCompany, validateCompanyName } from './lib/company';
@@ -16,14 +16,16 @@ import StageFour from './StageFour';
 import StageFive from './StageFive';
 import StageSix from './StageSix';
 import StageSeven from './StageSeven';
+import StageEight from './StageEight';
 import './stage-two.css';
 import './stage-three.css';
 import './stage-four.css';
 import './stage-five.css';
 import './stage-six.css';
 import './stage-seven.css';
+import './stage-eight.css';
 
-type Page = 'Overview' | 'Companies' | 'Employees' | 'Departments' | 'Projects' | 'Operations' | 'AI Studio' | 'AI Queue' | 'Integrations & Deliverables' | 'Knowledge' | 'Approvals' | 'Analytics' | 'Automations' | 'Integrations' | 'Settings';
+type Page = 'Overview' | 'Companies' | 'Employees' | 'Departments' | 'Projects' | 'Operations' | 'AI Studio' | 'AI Queue' | 'Integrations & Deliverables' | 'Knowledge' | 'Approvals' | 'Analytics' | 'Automations' | 'Goals & KPIs' | 'Integrations' | 'Settings';
 
 const navigation: { label: Page; icon: typeof LayoutDashboard; group: string }[] = [
   { label: 'Overview', icon: LayoutDashboard, group: 'WORKSPACE' },
@@ -38,6 +40,7 @@ const navigation: { label: Page; icon: typeof LayoutDashboard; group: string }[]
   { label: 'Approvals', icon: ShieldCheck, group: 'RESOURCES' },
   { label: 'Analytics', icon: ArrowUpRight, group: 'RESOURCES' },
   { label: 'Automations', icon: Workflow, group: 'RESOURCES' },
+  { label: 'Goals & KPIs', icon: Target, group: 'RESOURCES' },
   { label: 'Integrations & Deliverables', icon: Sparkles, group: 'ADMINISTRATION' },
   { label: 'Settings', icon: Settings2, group: 'ADMINISTRATION' },
 ];
@@ -368,9 +371,10 @@ export default function App() {
           {page === 'Integrations & Deliverables' && <StageFive companyId={activeCompany?.id ?? null} userId={user?.id ?? null} demoMode={demoMode} />}
           {(['Knowledge', 'Approvals', 'Analytics'] as const).includes(page as 'Knowledge' | 'Approvals' | 'Analytics') && <StageSix page={page as 'Knowledge' | 'Approvals' | 'Analytics'} companyId={activeCompany?.id ?? null} userId={user?.id ?? null} demoMode={demoMode} />}
           {page === 'Automations' && <StageSeven companyId={activeCompany?.id ?? null} userId={user?.id ?? null} demoMode={demoMode} />}
+          {page === 'Goals & KPIs' && <StageEight companyId={activeCompany?.id ?? null} userId={user?.id ?? null} demoMode={demoMode} />}
 
-          {!['Overview', 'Companies', 'Settings', 'Employees', 'Departments', 'Projects', 'Operations', 'AI Studio', 'AI Queue', 'Integrations & Deliverables', 'Knowledge', 'Approvals', 'Analytics', 'Automations'].includes(page) && <section className="subpage"><div className="subpage-heading"><div><p className="eyebrow">AUTOBUSINESS</p><h1>{page}</h1><p className="muted">This workspace section is planned for a later implementation stage.</p></div></div><div className="panel roadmap-card"><div className="roadmap-icon"><Bot size={24} /></div><h2>{page} is on the roadmap</h2><p>Stage 6 adds a company knowledge library, approval centre and operational analytics with CSV exports. External actions still require secure provider adapters.</p><div className="roadmap-note"><ShieldCheck size={17} /><span>Records are scoped to the selected company and protected by Supabase row-level security when connected.</span></div></div></section>}
-          <footer className="page-footer"><span>AutoBusiness <span className="footer-separator">·</span> Stages 1–7</span><span><span className="status-dot" /> {demoMode ? 'Browser-local demo' : 'Supabase connected'}</span></footer>
+          {!['Overview', 'Companies', 'Settings', 'Employees', 'Departments', 'Projects', 'Operations', 'AI Studio', 'AI Queue', 'Integrations & Deliverables', 'Knowledge', 'Approvals', 'Analytics', 'Automations', 'Goals & KPIs'].includes(page) && <section className="subpage"><div className="subpage-heading"><div><p className="eyebrow">AUTOBUSINESS</p><h1>{page}</h1><p className="muted">This workspace section is planned for a later implementation stage.</p></div></div><div className="panel roadmap-card"><div className="roadmap-icon"><Bot size={24} /></div><h2>{page} is on the roadmap</h2><p>Stage 6 adds a company knowledge library, approval centre and operational analytics with CSV exports. External actions still require secure provider adapters.</p><div className="roadmap-note"><ShieldCheck size={17} /><span>Records are scoped to the selected company and protected by Supabase row-level security when connected.</span></div></div></section>}
+          <footer className="page-footer"><span>AutoBusiness <span className="footer-separator">·</span> Stages 1–8</span><span><span className="status-dot" /> {demoMode ? 'Browser-local demo' : 'Supabase connected'}</span></footer>
         </div>
       </main>
 
