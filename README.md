@@ -1,41 +1,51 @@
 # AutoBusiness
 
-AutoBusiness is a workspace for managing AI employees across multiple companies.
+AutoBusiness is a multi-company workspace for configuring AI employees, assigning work, reviewing deliverables, tracking goals, and communicating with the team.
 
-## Current app experience
+## Current capabilities
 
-- Company chooser and create-company flow.
-- Dashboard with team status, jobs, usage estimates, activity and example goals.
-- Department-organised employee directory, with nested department support in the data model.
-- Employee profiles with editable tone, model preference and custom instructions.
-- Private and group conversations, with a Puter.js-powered reply attempt in private employee chats.
-- Job assignment, queue, submission and approval flows.
-- Settings for security/approval preferences, rulesets, connectors, automation and illustrative usage limits.
+- Supabase email/password authentication with persistent sessions.
+- Company creation and membership-scoped company lists.
+- Cloud-backed departments, employees, job briefs, job results, review feedback, conversations, messages, workspace settings, and goals.
+- Row-level security for workspace data; unauthenticated access to workspace tables is revoked.
+- Real dashboard counts based on stored employee, job, deliverable, and goal records rather than seeded example metrics.
+- Goal creation and progress tracking saved to the company workspace.
+- Job assignment, deliverable generation through Puter.js, revision requests, and approval.
 - Responsive desktop and mobile layouts.
-- Local demo data saved in the browser so the app is usable without credentials.
+
+New companies are created with a starter AI team and departments. Jobs, conversations, goals, and activity start empty; no fake company results are seeded into a new workspace.
 
 ## Run locally
 
 1. Install Node.js 20 or newer.
-2. Run `npm install`.
-3. Run `npm run dev`.
-4. Open the local URL printed by Vite.
+2. Copy `.env.example` to `.env` and set your Supabase project URL and publishable key. The repository contains a public publishable-key fallback for the configured project, so these values can be overridden for local development.
+3. Run `npm install`.
+4. Run `npm run dev`.
+5. Open the local URL printed by Vite.
 
-## AI provider
+Never put a Supabase service-role or secret key in frontend code or Vite environment variables.
 
-The UI loads Puter.js in the browser and attempts to use `puter.ai.chat` for private employee chats. Provider/model availability depends on the current Puter.js environment and user authorization. The app includes a fallback when Puter is unavailable.
+## Authentication setup
 
-## Supabase
+The app uses Supabase Auth email/password sign-in and account creation. If email confirmation is enabled, configure the Supabase Auth URL allow-list to include the local development URL and the deployed GitHub Pages URL (`https://andygeng2023.github.io/AutoBusiness/`). Account confirmation links are directed back to the app base path.
 
-The migration in `supabase/migrations/0001_workspace.sql` defines the intended multi-company data model and row-level security policies. The current UI is still in browser-local demo mode; shared persistence and authenticated access need to be wired and tested before treating this as a production multi-user system.
+## Data and security
 
-Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in a local `.env` file when implementing the database adapter. Do not expose service-role keys in the browser.
+The workspace database lives in Supabase project `wctlalaitdrzihvthvze`. The app uses the public publishable key from the browser and relies on Supabase Auth plus row-level security for access control. The creator of a company becomes its owner through the database trigger. Workspace data is shared across signed-in members who have company membership.
+
+The app currently loads shared data when a workspace is opened; live push updates between already-open browser sessions are not yet implemented. Refresh or reopen the workspace to load changes made by another user.
+
+## AI provider and limitations
+
+Puter.js is loaded in the browser and is used for private employee chat replies and job deliverables. Availability and model access depend on the Puter.js environment and its user authorization. AI provider token usage and billing are not exposed by this browser integration, so the dashboard reports saved deliverables and approved jobs rather than invented usage units.
+
+The connector and automation settings are preferences, not integrations with external services. GitHub, Slack, Google Drive, and web-search actions are not wired up. Jobs are run when a user explicitly starts generation; there is no always-on background worker.
 
 ## Build and test
 
 - `npm run build` — TypeScript check and production build.
-- `npm test` — Vitest test suite (tests will be added as workflows are implemented).
+- `npm test` — Vitest suite.
 
 ## Deployment
 
-GitHub Pages deployment is configured for the `main` branch. The Vite base path automatically uses `/AutoBusiness/` in GitHub Actions.
+GitHub Pages deployment is configured for the `main` branch. Vite uses `/AutoBusiness/` as its base path in GitHub Actions.
