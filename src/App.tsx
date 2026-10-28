@@ -8,7 +8,7 @@ import {
 import "./styles.css";
 import { supabase } from "./supabase";
 
-type Employee = { id: string; name: string; role: string; deptId: string; tone: string; model: string; instructions: string; status: "Available" | "Working" | "Needs review"; task?: string };
+type Employee = { id: string; name: string; role: string; deptId: string; tone: string; model: string; instructions: string; status: "Available" | "Working" | "Needs review" | "Paused"; task?: string };
 type Dept = { id: string; name: string; parentId?: string };
 type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string };
 type Message = { id: string; from: string; text: string; time: string; jobId?: string; createdAt?: string };
@@ -18,11 +18,6 @@ type Goal = { id: string; title: string; description: string; progress: number; 
 type AuthUser = { id: string; email?: string };
 type Settings = { approvalRequired: boolean; dailyLimit: number; monthlyLimit: number; autoRun: boolean; connectors: string[] };
 
-const initialCompanies: Company[] = [
-  { id: "northstar", name: "Northstar Studio", industry: "Creative & marketing", initials: "NS", color: "violet", description: "Brand, content and client delivery" },
-  { id: "fieldnote", name: "Fieldnote Labs", industry: "Software & product", initials: "FL", color: "blue", description: "Product development and research" },
-  { id: "goodfolk", name: "Goodfolk Goods", industry: "Retail & commerce", initials: "GG", color: "amber", description: "Operations, growth and support" }
-];
 const seedDepts: Dept[] = [
   { id: "leadership", name: "Leadership" }, { id: "creative", name: "Creative" },
   { id: "growth", name: "Growth" }, { id: "operations", name: "Operations" },
@@ -36,25 +31,7 @@ const seedEmployees: Employee[] = [
   { id: "ella", name: "Ella Rossi", role: "Operations Manager", deptId: "operations", tone: "Practical & direct", model: "GPT-4o mini", instructions: "Prefer repeatable processes and concise checklists.", status: "Available" },
   { id: "jules", name: "Jules Park", role: "Product Designer", deptId: "design", tone: "Curious & collaborative", model: "Claude Sonnet", instructions: "Explain trade-offs and design for accessibility.", status: "Available" }
 ];
-const seedJobs: Job[] = [
-  { id: "job-1", title: "Q4 campaign positioning", employeeId: "leo", status: "In progress", priority: "Urgent", created: "10 min ago" },
-  { id: "job-2", title: "Weekly growth report", employeeId: "noah", status: "Submitted", priority: "Normal", created: "28 min ago", submittedAt: "09:26", result: "Weekly Growth Report\n\nExecutive summary\nThis is illustrative sample content, not live analytics from a connected data source.\n\nKey findings\n• Compare sessions, sign-ups, and conversion rate by acquisition channel.\n• Identify channels with rising acquisition cost or declining conversion.\n• Validate anomalies before acting.\n\nRecommended next steps\n1. Review channel-level conversion and cost trends.\n2. Investigate the largest week-over-week changes.\n3. Run one measurable experiment on the strongest opportunity." },
-  { id: "job-3", title: "Review onboarding flow", employeeId: "jules", status: "Queued", priority: "Normal", created: "1 hr ago" }
-];
-const seedConversations: Conversation[] = [
-  { id: "team", name: "Company team", kind: "group", members: ["maya", "leo", "amara", "noah", "ella", "jules"], messages: [
-    { id: "m1", from: "maya", text: "Morning team. Please share blockers before the planning review.", time: "09:12" },
-    { id: "m2", from: "leo", text: "Campaign positioning is in progress. I’ll share two directions shortly.", time: "09:18" },
-    { id: "m3", from: "noah", text: "The weekly growth report is ready for review.", time: "09:26", jobId: "job-2" }
-  ] },
-  { id: "maya-chat", name: "Maya Chen", kind: "private", members: ["maya"], messages: [{ id: "m4", from: "maya", text: "I can help coordinate priorities, delegate work and surface decisions that need you.", time: "09:08" }] },
-  { id: "leo-chat", name: "Leo Martin", kind: "private", members: ["leo"], messages: [{ id: "m5", from: "leo", text: "I’m exploring a sharper campaign story with a clear customer promise.", time: "09:18" }] }
-];
 const defaultSettings: Settings = { approvalRequired: true, dailyLimit: 50, monthlyLimit: 900, autoRun: false, connectors: ["Puter AI", "Supabase", "GitHub"] };
-const readStore = <T,>(key: string, fallback: T): T => {
-  try { const value = localStorage.getItem("autobusiness:" + key); return value ? JSON.parse(value) as T : fallback; } catch { return fallback; }
-};
-const persist = (key: string, value: unknown) => { try { localStorage.setItem("autobusiness:" + key, JSON.stringify(value)); } catch { /* storage can be unavailable */ } };
 const initials = (name: string) => name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 const nowTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 declare global { interface Window { puter?: { ai?: { chat: (prompt: string, options?: Record<string, unknown>) => Promise<unknown> } } } }
@@ -86,7 +63,7 @@ export default function App() {
   const [page, setPage] = useState("Dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedEmployee, setSelectedEmployee] = useState("maya");
-  const [selectedChat, setSelectedChat] = useState("team");
+  const [selectedChat, setSelectedChat] = useState("");
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [jobTitle, setJobTitle] = useState("");
@@ -197,7 +174,7 @@ export default function App() {
     setAuthBusy(true);
     try {
       if (authMode === "signup") {
-        const { data, error } = await supabase.auth.signUp({ email: authEmail.trim(), password: authPassword });
+        const { data, error } = await supabase.auth.signUp({ email: authEmail.trim(), password: authPassword, options: { emailRedirectTo: window.location.origin + import.meta.env.BASE_URL } });
         if (error) throw error;
         if (!data.session) setAuthNotice("Account created. Check your email to confirm your address, then sign in.");
         else setAuthNotice("Account created successfully.");
@@ -239,7 +216,7 @@ export default function App() {
       const memberRows = memberRes.data ?? [];
       const nextEmployees: Employee[] = employeeRows.map((row: any) => ({
         id: row.id, name: row.name, role: row.role, deptId: row.department_id ?? "", tone: row.tone,
-        model: row.model, instructions: row.custom_instructions, status: row.status === "needs_review" ? "Needs review" : row.status === "working" ? "Working" : row.status === "paused" ? "Available" : "Available",
+        model: row.model, instructions: row.custom_instructions, status: row.status === "needs_review" ? "Needs review" : row.status === "working" ? "Working" : row.status === "paused" ? "Paused" : "Available",
         task: row.current_task ?? undefined
       }));
       setDepts(departmentRows.map((row: any) => ({ id: row.id, name: row.name, parentId: row.parent_id ?? undefined })));
