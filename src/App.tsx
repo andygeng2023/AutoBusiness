@@ -293,7 +293,7 @@ export default function App() {
     event.preventDefault();
     if (!message.trim() || !activeConversation) return;
     const text = message.trim(); setMessage("");
-    const sent: Message = { id: crypto.randomUUID(), from: "you", text, time: nowTime() };
+    const sent: Message = { id: crypto.randomUUID(), from: "you", text, time: nowTime(), createdAt: new Date().toISOString() };
     setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, sent] } : c));
     if (activeConversation.kind === "private" && activeConversation.members.length === 1) {
       const emp = employeeMap.get(activeConversation.members[0]);
@@ -309,10 +309,10 @@ export default function App() {
         } else {
           reply = "I’ve received your message. To enable live AI replies, configure Puter.js in this deployment. I can still track jobs and updates here.";
         }
-        const response: Message = { id: crypto.randomUUID(), from: emp.id, text: reply, time: nowTime() };
+        const response: Message = { id: crypto.randomUUID(), from: emp.id, text: reply, time: nowTime(), createdAt: new Date().toISOString() };
         setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, response] } : c));
       } catch {
-        setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: emp.id, text: "I couldn’t reach the AI provider just now. Your message is saved; please try again shortly.", time: nowTime() }] } : c));
+        setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: emp.id, text: "I couldn’t reach the AI provider just now. Your message is saved; please try again shortly.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
       } finally { setBusy(false); }
     }
   };
@@ -331,7 +331,7 @@ export default function App() {
       if (!output.trim()) throw new Error("The AI provider returned an empty deliverable.");
       setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Submitted", result: output, submittedAt: nowTime() } : j));
       setEmployees((old) => old.map((e) => e.id === emp.id ? { ...e, status: "Needs review", task: job.title } : e));
-      setConversations((old) => old.map((c) => c.id === "team" ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: emp.id, text: "I’ve completed the deliverable for “" + job.title + "”. Open the job to inspect the actual work before approving it.", time: nowTime(), jobId }] } : c));
+      setConversations((old) => old.map((c) => c.id === "team" ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: emp.id, text: "I’ve completed the deliverable for “" + job.title + "”. Open the job to inspect the actual work before approving it.", time: nowTime(), createdAt: new Date().toISOString(), jobId }] } : c));
       setSelectedJobId(jobId);
       notify("Deliverable created — review the work");
     } catch (error) {
@@ -387,17 +387,31 @@ export default function App() {
     setEmployees((old) => [...old, { id, name: employeeName.trim(), role: employeeRole.trim(), deptId: newEmployeeDept || depts[0]?.id || "leadership", tone: "Clear & concise", model: "GPT-4o mini", instructions: "", status: "Available" }]);
     setEmployeeName(""); setEmployeeRole(""); setNewEmployeeDept("leadership"); setShowEmployeeForm(false); setSelectedEmployee(id); notify("Employee created");
   };
-  const createConversation = (event: FormEvent) => {
-    event.preventDefault(); if (!newChatName.trim()) return;
-    const id = crypto.randomUUID(); const chat: Conversation = { id, name: newChatName.trim(), kind: newChatMembers.length > 1 ? "group" : "private", members: newChatMembers.length ? newChatMembers : ["maya"], messages: [] };
+  const createConversation = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!newChatName.trim() || !company || !user) return;
+    const members = newChatMembers.length ? newChatMembers : employees[0] ? [employees[0].id] : [];
+    const id = crypto.randomUUID();
+    const chat: Conversation = { id, name: newChatName.trim(), kind: members.length > 1 ? "group" : "private", members, messages: [], createdBy: user.id };
+    const { error } = await supabase.from("conversations").insert({ id, company_id: company.id, name: chat.name, kind: chat.kind, created_by: user.id });
+    if (error) { notify("Could not create conversation: " + error.message); return; }
+    const membershipRows = [{ company_id: company.id, conversation_id: id, user_id: user.id, employee_id: null }, ...members.map((employeeId) => ({ company_id: company.id, conversation_id: id, user_id: null, employee_id: employeeId }))];
+    const { error: membershipError } = await supabase.from("conversation_members").insert(membershipRows);
+    if (membershipError) { notify("Conversation created, but members could not be added: " + membershipError.message); }
     setConversations((old) => [chat, ...old]); setSelectedChat(id); setNewChatName(""); setNewChatMembers([]); setShowChatForm(false); setPage("Communication");
   };
-  const openChatWith = (id: string) => {
+  const openChatWith = async (id: string) => {
     const found = conversations.find((c) => c.members.length === 1 && c.members[0] === id && c.kind === "private");
     if (found) setSelectedChat(found.id);
     else {
-      const e = employeeMap.get(id); const created: Conversation = { id: "private-" + id, name: e?.name ?? "Employee", kind: "private", members: [id], messages: [] };
-      setConversations((old) => old.some((c) => c.id === created.id) ? old : [created, ...old]); setSelectedChat(created.id);
+      if (!company || !user) return;
+      const e = employeeMap.get(id); const conversationId = crypto.randomUUID();
+      const created: Conversation = { id: conversationId, name: e?.name ?? "Employee", kind: "private", members: [id], messages: [], createdBy: user.id };
+      const { error } = await supabase.from("conversations").insert({ id: conversationId, company_id: company.id, name: created.name, kind: "private", created_by: user.id });
+      if (error) { notify("Could not open conversation: " + error.message); return; }
+      const { error: membershipError } = await supabase.from("conversation_members").insert([{ company_id: company.id, conversation_id: conversationId, user_id: user.id, employee_id: null }, { company_id: company.id, conversation_id: conversationId, user_id: null, employee_id: id }]);
+      if (membershipError) { notify("Could not add conversation members: " + membershipError.message); return; }
+      setConversations((old) => [created, ...old]); setSelectedChat(created.id);
     }
     setPage("Communication");
   };
