@@ -190,6 +190,30 @@ export default function App() {
   ];
 
   const notify = (text: string) => setToast(text);
+  const handleAuthSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setAuthError(""); setAuthNotice("");
+    if (!authEmail.trim() || authPassword.length < 8) { setAuthError("Enter a valid email and a password with at least 8 characters."); return; }
+    setAuthBusy(true);
+    try {
+      if (authMode === "signup") {
+        const { data, error } = await supabase.auth.signUp({ email: authEmail.trim(), password: authPassword });
+        if (error) throw error;
+        if (!data.session) setAuthNotice("Account created. Check your email to confirm your address, then sign in.");
+        else setAuthNotice("Account created successfully.");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword });
+        if (error) throw error;
+      }
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Authentication failed. Please try again.");
+    } finally { setAuthBusy(false); }
+  };
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) notify("Could not sign out: " + error.message);
+    else { setCompany(null); setLoadedCompanyId(null); setCompanies([]); setUser(null); }
+  };
   const openCompany = async (item: Company) => {
     setCompany(item);
     setLoadedCompanyId(null);
@@ -259,8 +283,8 @@ export default function App() {
   const changePage = (next: string) => { setPage(next); if (next === "Communication") setSelectedChat("team"); };
   const createJob = (event: FormEvent) => {
     event.preventDefault();
-    if (!jobTitle.trim()) return;
-    const job: Job = { id: crypto.randomUUID(), title: jobTitle.trim(), description: jobDescription.trim(), employeeId: jobEmployee, status: settings.approvalRequired ? "Queued" : "In progress", priority: jobPriority, created: "Just now" };
+    if (!jobTitle.trim() || !company || !user || !jobEmployee) { notify("Create an employee before assigning a job"); return; }
+    const job: Job = { id: crypto.randomUUID(), title: jobTitle.trim(), description: jobDescription.trim(), employeeId: jobEmployee, status: settings.approvalRequired ? "Queued" : "In progress", priority: jobPriority, created: new Date().toISOString(), createdBy: user.id };
     setJobs((old) => [job, ...old]);
     setEmployees((old) => old.map((e) => e.id === jobEmployee ? { ...e, status: settings.approvalRequired ? "Available" : "Working", task: job.title } : e));
     setJobTitle(""); setJobDescription(""); setJobPriority("Normal"); setShowJobForm(false); notify(settings.approvalRequired ? "Job queued for approval" : "Job assigned");
@@ -318,10 +342,44 @@ export default function App() {
   const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress" } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
   const requestRevision = (jobId: string) => { if (!reviewNote.trim()) { notify("Add a note explaining what needs to change"); return; } setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Rejected", reviewNote: reviewNote.trim() } : j)); notify("Revision requested — feedback saved to the job"); };
   const deleteJob = (jobId: string) => { setJobs((old) => old.filter((j) => j.id !== jobId)); setSelectedJobId((current) => current === jobId ? null : current); notify("Job deleted"); };
-  const createCompany = (event: FormEvent) => {
-    event.preventDefault(); if (!companyName.trim()) return;
-    const name = companyName.trim(); const item = { id: crypto.randomUUID(), name, industry: "New workspace", initials: initials(name), color: "blue", description: "Your new company workspace" };
-    setCompanies((old) => [...old, item]); setCompanyName(""); setShowCompanyForm(false); openCompany(item);
+  const createCompany = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!companyName.trim() || !user) return;
+    setAuthBusy(true);
+    try {
+      const name = companyName.trim();
+      const { data: created, error } = await supabase.from("companies").insert({ name, industry: "New workspace", created_by: user.id }).select("id,name,industry").single();
+      if (error) throw error;
+      const companyId = created.id as string;
+      const deptIds = new Map(seedDepts.map((dept) => [dept.id, crypto.randomUUID()]));
+      const departmentRows = seedDepts.map((dept) => ({ id: deptIds.get(dept.id), company_id: companyId, name: dept.name, parent_id: dept.parentId ? deptIds.get(dept.parentId) : null }));
+      const { error: deptError } = await supabase.from("departments").insert(departmentRows);
+      if (deptError) throw deptError;
+      const employeeIds = new Map(seedEmployees.map((employee) => [employee.id, crypto.randomUUID()]));
+      const employeeRows = seedEmployees.map((employee) => ({ id: employeeIds.get(employee.id), company_id: companyId, department_id: deptIds.get(employee.deptId) ?? null, name: employee.name, role: employee.role, tone: employee.tone, model: employee.model, custom_instructions: employee.instructions, status: "available" }));
+      const { error: employeeError } = await supabase.from("employees").insert(employeeRows);
+      if (employeeError) throw employeeError;
+      const teamId = crypto.randomUUID();
+      const { error: convError } = await supabase.from("conversations").insert({ id: teamId, company_id: companyId, name: "Company team", kind: "group", created_by: user.id });
+      if (convError) throw convError;
+      const memberRows = [{ company_id: companyId, conversation_id: teamId, user_id: user.id, employee_id: null }, ...Array.from(employeeIds.values()).map((employeeId) => ({ company_id: companyId, conversation_id: teamId, user_id: null, employee_id: employeeId }))];
+      const { error: memberError } = await supabase.from("conversation_members").insert(memberRows);
+      if (memberError) throw memberError;
+      const item: Company = { id: companyId, name: created.name, industry: created.industry, initials: initials(created.name), color: "blue", description: "Shared cloud workspace" };
+      setCompanies((old) => [item, ...old]); setCompanyName(""); setShowCompanyForm(false);
+      await openCompany(item);
+      notify("Cloud workspace created");
+    } catch (error) {
+      notify("Could not create workspace: " + (error instanceof Error ? error.message : "Unknown database error"));
+    } finally { setAuthBusy(false); }
+  };
+  const createGoal = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!company || !user || !goalTitle.trim()) return;
+    const goal: Goal = { id: crypto.randomUUID(), title: goalTitle.trim(), description: goalDescription.trim(), progress: 0, dueDate: goalDueDate || undefined, status: "active" };
+    const { error } = await supabase.from("goals").insert({ id: goal.id, company_id: company.id, title: goal.title, description: goal.description, progress: 0, due_date: goal.dueDate ?? null, status: goal.status, created_by: user.id });
+    if (error) { notify("Could not create goal: " + error.message); return; }
+    setGoals((old) => [goal, ...old]); setGoalTitle(""); setGoalDescription(""); setGoalDueDate(""); setShowGoalForm(false); notify("Goal created");
   };
   const createEmployee = (event: FormEvent) => {
     event.preventDefault(); if (!employeeName.trim() || !employeeRole.trim()) return;
