@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Activity, ArrowDownLeft, ArrowLeft, ArrowUpRight, Bot, Building2, Check,
   CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Gauge,
@@ -56,6 +56,13 @@ export default function App() {
   const [loadingCompanies, setLoadingCompanies] = useState(false);
   const [loadingWorkspace, setLoadingWorkspace] = useState(false);
   const [loadedCompanyId, setLoadedCompanyId] = useState<string | null>(null);
+  const [memberRole, setMemberRole] = useState<"owner" | "admin" | "member">("member");
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
+  const [inviteUrl, setInviteUrl] = useState("");
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const inviteHandledRef = useRef(false);
   const [showGoalForm, setShowGoalForm] = useState(false);
   const [goalTitle, setGoalTitle] = useState("");
   const [goalDescription, setGoalDescription] = useState("");
@@ -197,7 +204,7 @@ export default function App() {
     setLoadingWorkspace(true);
     setPage("Dashboard");
     try {
-      const [deptRes, employeeRes, jobRes, convRes, messageRes, memberRes, settingsRes, goalRes] = await Promise.all([
+      const [deptRes, employeeRes, jobRes, convRes, messageRes, memberRes, settingsRes, goalRes, roleRes] = await Promise.all([
         supabase.from("departments").select("*").eq("company_id", item.id).order("created_at"),
         supabase.from("employees").select("*").eq("company_id", item.id).order("created_at"),
         supabase.from("jobs").select("*").eq("company_id", item.id).order("created_at", { ascending: false }),
@@ -245,7 +252,7 @@ export default function App() {
         dailyLimit: dbSettings.daily_usage_limit, monthlyLimit: dbSettings.monthly_usage_limit,
         connectors: Array.from(new Set([...(dbSettings.enabled_connectors ?? ["puter"]).map((name: string) => (({ puter: "Puter AI", github: "GitHub", supabase: "Supabase", google_drive: "Google Drive", slack: "Slack", web_search: "Web search" } as Record<string, string>)[name] ?? name)), "Supabase"]))
       } : defaultSettings);
-      setGoals((goalRes.data ?? []).map((row: any) => ({ id: row.id, title: row.title, description: row.description, progress: Number(row.progress), dueDate: row.due_date ?? undefined, status: row.status })));
+      setGoals((goalRes.data ?? []).map((row: any) => ({ id: row.id, title: row.title, description: row.description, progress: Number(row.progress), dueDate: row.due_date ?? undefined, status: row.status })));\n      setMemberRole(roleRes.data?.role ?? "member");
       setSelectedEmployee(nextEmployees[0]?.id ?? "");
       setJobEmployee(nextEmployees[0]?.id ?? "");
       setNewEmployeeDept(departmentRows[0]?.id ?? "");
@@ -259,6 +266,29 @@ export default function App() {
       setLoadingWorkspace(false);
     }
   };
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get("invite");
+    if (!user || !token || inviteHandledRef.current) return;
+    inviteHandledRef.current = true;
+    const accept = async () => {
+      try {
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+        const tokenHash = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+        const { data: companyId, error } = await supabase.rpc("accept_company_invite", { p_token_hash: tokenHash });
+        if (error) throw error;
+        window.history.replaceState({}, document.title, window.location.pathname);
+        const { data: row, error: companyError } = await supabase.from("companies").select("id,name,industry").eq("id", companyId).single();
+        if (companyError) throw companyError;
+        const invitedCompany: Company = { id: row.id, name: row.name, industry: row.industry || "Company workspace", initials: initials(row.name), color: "blue", description: "Shared cloud workspace" };
+        setCompanies((old) => old.some((item) => item.id === invitedCompany.id) ? old : [invitedCompany, ...old]);
+        notify("Invitation accepted. Welcome to " + invitedCompany.name + ".");
+        await openCompany(invitedCompany);
+      } catch (error) {
+        notify("Could not accept invitation: " + (error instanceof Error ? error.message : "Invalid or expired invite"));
+      }
+    };
+    void accept();
+  }, [user?.id]);
   const changePage = (next: string) => { setPage(next); if (next === "Communication") setSelectedChat(conversations.find((c) => c.kind === "group")?.id ?? conversations[0]?.id ?? ""); };
   const createJob = (event: FormEvent) => {
     event.preventDefault();
