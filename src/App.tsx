@@ -6,13 +6,16 @@ import {
   Search, Send, Settings2, ShieldCheck, Sparkles, Users, Workflow, Zap
 } from "lucide-react";
 import "./styles.css";
+import { supabase } from "./supabase";
 
 type Employee = { id: string; name: string; role: string; deptId: string; tone: string; model: string; instructions: string; status: "Available" | "Working" | "Needs review"; task?: string };
 type Dept = { id: string; name: string; parentId?: string };
-type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; result?: string; submittedAt?: string; reviewNote?: string };
-type Message = { id: string; from: string; text: string; time: string; jobId?: string };
-type Conversation = { id: string; name: string; kind: "private" | "group"; members: string[]; messages: Message[] };
+type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string };
+type Message = { id: string; from: string; text: string; time: string; jobId?: string; createdAt?: string };
+type Conversation = { id: string; name: string; kind: "private" | "group"; members: string[]; messages: Message[]; createdBy?: string };
 type Company = { id: string; name: string; industry: string; initials: string; color: string; description: string };
+type Goal = { id: string; title: string; description: string; progress: number; dueDate?: string; status: "planned" | "active" | "paused" | "completed" };
+type AuthUser = { id: string; email?: string };
 type Settings = { approvalRequired: boolean; dailyLimit: number; monthlyLimit: number; autoRun: boolean; connectors: string[] };
 
 const initialCompanies: Company[] = [
@@ -57,13 +60,29 @@ const nowTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minut
 declare global { interface Window { puter?: { ai?: { chat: (prompt: string, options?: Record<string, unknown>) => Promise<unknown> } } } }
 
 export default function App() {
-  const [companies, setCompanies] = useState(() => readStore("companies", initialCompanies));
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [company, setCompany] = useState<Company | null>(null);
-  const [depts, setDepts] = useState(() => readStore("depts", seedDepts));
-  const [employees, setEmployees] = useState(() => readStore("employees", seedEmployees));
-  const [jobs, setJobs] = useState(() => readStore("jobs", seedJobs));
-  const [conversations, setConversations] = useState(() => readStore("conversations", seedConversations));
-  const [settings, setSettings] = useState(() => readStore("settings", defaultSettings));
+  const [depts, setDepts] = useState<Dept[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [loadingCompanies, setLoadingCompanies] = useState(false);
+  const [loadingWorkspace, setLoadingWorkspace] = useState(false);
+  const [loadedCompanyId, setLoadedCompanyId] = useState<string | null>(null);
+  const [showGoalForm, setShowGoalForm] = useState(false);
+  const [goalTitle, setGoalTitle] = useState("");
+  const [goalDescription, setGoalDescription] = useState("");
+  const [goalDueDate, setGoalDueDate] = useState("");
   const [page, setPage] = useState("Dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedEmployee, setSelectedEmployee] = useState("maya");
@@ -76,7 +95,7 @@ export default function App() {
   const [jobSearch, setJobSearch] = useState("");
   const [jobStatusFilter, setJobStatusFilter] = useState("All statuses");
   const [reviewNote, setReviewNote] = useState("");
-  const [jobEmployee, setJobEmployee] = useState("maya");
+  const [jobEmployee, setJobEmployee] = useState("");
   const [showJobForm, setShowJobForm] = useState(false);
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   const [showCompanyForm, setShowCompanyForm] = useState(false);
@@ -92,12 +111,68 @@ export default function App() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [activeSettings, setActiveSettings] = useState("General");
 
-  useEffect(() => { persist("companies", companies); }, [companies]);
-  useEffect(() => { if (company) persist("depts:" + company.id, depts); }, [company, depts]);
-  useEffect(() => { if (company) persist("employees:" + company.id, employees); }, [company, employees]);
-  useEffect(() => { if (company) persist("jobs:" + company.id, jobs); }, [company, jobs]);
-  useEffect(() => { if (company) persist("conversations:" + company.id, conversations); }, [company, conversations]);
-  useEffect(() => { if (company) persist("settings:" + company.id, settings); }, [company, settings]);
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!active) return;
+      if (error) setAuthError(error.message);
+      setUser(data.session?.user ? { id: data.session.user.id, email: data.session.user.email } : null);
+      setAuthLoading(false);
+    }).catch((error: unknown) => { if (active) { setAuthError(error instanceof Error ? error.message : "Could not initialise sign-in"); setAuthLoading(false); } });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
+      if (!session?.user) { setCompany(null); setCompanies([]); setLoadedCompanyId(null); }
+    });
+    return () => { active = false; subscription.unsubscribe(); };
+  }, []);
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    setLoadingCompanies(true);
+    supabase.from("companies").select("id,name,industry,created_by,created_at").order("created_at", { ascending: false }).then(({ data, error }) => {
+      if (!active) return;
+      if (error) { notify("Could not load companies: " + error.message); setCompanies([]); }
+      else setCompanies((data ?? []).map((row: any) => ({ id: row.id, name: row.name, industry: row.industry || "Company workspace", initials: initials(row.name), color: "blue", description: "Shared cloud workspace" })));
+      setLoadingCompanies(false);
+    });
+    return () => { active = false; };
+  }, [user?.id]);
+  useEffect(() => {
+    if (!user || !company || loadedCompanyId !== company.id) return;
+    const companyId = company.id;
+    void supabase.from("departments").upsert(depts.map((d) => ({ id: d.id, company_id: companyId, name: d.name, parent_id: d.parentId ?? null })), { onConflict: "id" }).then(({ error }) => { if (error && depts.length) notify("Department save failed: " + error.message); });
+  }, [depts, loadedCompanyId, company?.id, user?.id]);
+  useEffect(() => {
+    if (!user || !company || loadedCompanyId !== company.id) return;
+    const companyId = company.id;
+    void supabase.from("employees").upsert(employees.map((e) => ({ id: e.id, company_id: companyId, department_id: e.deptId || null, name: e.name, role: e.role, tone: e.tone, model: e.model, custom_instructions: e.instructions, status: e.status === "Needs review" ? "needs_review" : e.status.toLowerCase(), current_task: e.task ?? null, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && employees.length) notify("Employee save failed: " + error.message); });
+  }, [employees, loadedCompanyId, company?.id, user?.id]);
+  useEffect(() => {
+    if (!user || !company || loadedCompanyId !== company.id) return;
+    const companyId = company.id;
+    void supabase.from("jobs").upsert(jobs.map((j) => ({ id: j.id, company_id: companyId, employee_id: j.employeeId || null, title: j.title, description: j.description ?? "", status: j.status.toLowerCase().replace(" ", "_"), priority: j.priority.toLowerCase(), result: j.result ?? "", created_by: j.createdBy ?? user.id, reviewed_by: j.status === "Approved" ? user.id : null, created_at: j.created && !Number.isNaN(Date.parse(j.created)) ? new Date(j.created).toISOString() : new Date().toISOString(), submitted_at: j.submittedAt ? new Date().toISOString() : null, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && jobs.length) notify("Job save failed: " + error.message); });
+  }, [jobs, loadedCompanyId, company?.id, user?.id]);
+  useEffect(() => {
+    if (!user || !company || loadedCompanyId !== company.id) return;
+    const companyId = company.id;
+    void supabase.from("conversations").upsert(conversations.map((c) => ({ id: c.id, company_id: companyId, name: c.name, kind: c.kind, created_by: c.createdBy ?? user.id })), { onConflict: "id" }).then(async ({ error }) => {
+      if (error) { if (conversations.length) notify("Conversation save failed: " + error.message); return; }
+      const rows = conversations.flatMap((c) => c.messages.map((m) => ({ id: m.id, company_id: companyId, conversation_id: c.id, sender_user_id: m.from === "you" ? user.id : null, sender_employee_id: m.from === "you" ? null : m.from, body: m.text, job_id: m.jobId ?? null, created_at: m.createdAt ?? new Date().toISOString() })));
+      if (rows.length) { const result = await supabase.from("messages").upsert(rows, { onConflict: "id" }); if (result.error) notify("Message save failed: " + result.error.message); }
+    });
+  }, [conversations, loadedCompanyId, company?.id, user?.id]);
+  useEffect(() => {
+    if (!user || !company || loadedCompanyId !== company.id) return;
+    void supabase.from("workspace_settings").upsert({ company_id: company.id, approval_required: settings.approvalRequired, auto_run: settings.autoRun, daily_usage_limit: settings.dailyLimit, monthly_usage_limit: settings.monthlyLimit, enabled_connectors: settings.connectors.map((c) => c.toLowerCase().replaceAll(" ", "_")) }, { onConflict: "company_id" }).then(({ error }) => { if (error) notify("Settings save failed: " + error.message); });
+  }, [settings, loadedCompanyId, company?.id, user?.id]);
+  useEffect(() => {
+    if (!user || !company || loadedCompanyId !== company.id) return;
+    void supabase.from("goals").upsert(goals.map((g) => ({ id: g.id, company_id: company.id, title: g.title, description: g.description, progress: g.progress, due_date: g.dueDate || null, status: g.status, created_by: user.id, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && goals.length) notify("Goal save failed: " + error.message); });
+  }, [goals, loadedCompanyId, company?.id, user?.id]);
+  useEffect(() => {
+    if (!user || !company || loadedCompanyId !== company.id) return;
+    void supabase.from("companies").update({ name: company.name, industry: company.industry, updated_at: new Date().toISOString() }).eq("id", company.id).then(({ error }) => { if (error) notify("Company settings save failed: " + error.message); });
+  }, [company?.name, company?.industry, loadedCompanyId, user?.id]);
   useEffect(() => { if (toast) { const timer = window.setTimeout(() => setToast(""), 2800); return () => window.clearTimeout(timer); } }, [toast]);
   useEffect(() => { if (selectedJobId) { const selected = jobs.find((job) => job.id === selectedJobId); setReviewNote(selected?.reviewNote ?? ""); } }, [selectedJobId]);
 
