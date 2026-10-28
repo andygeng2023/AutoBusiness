@@ -104,7 +104,8 @@ export default function App() {
   const activeEmployee = employees.find((e) => e.id === selectedEmployee) ?? employees[0];
   const activeConversation = conversations.find((c) => c.id === selectedChat) ?? conversations[0];
   const employeeMap = useMemo(() => new Map(employees.map((e) => [e.id, e])), [employees]);
-  const pendingJobs = jobs.filter((j) => j.status === "Queued" || j.status === "Submitted" || j.status === "Rejected");\n  const filteredJobs = jobs.filter((j) => (j.title + " " + (j.description ?? "") + " " + (employeeMap.get(j.employeeId)?.name ?? "")).toLowerCase().includes(jobSearch.toLowerCase()) && (jobStatusFilter === "All statuses" || j.status === jobStatusFilter));
+  const pendingJobs = jobs.filter((j) => j.status === "Queued" || j.status === "Submitted" || j.status === "Rejected");
+  const filteredJobs = jobs.filter((j) => (j.title + " " + (j.description ?? "") + " " + (employeeMap.get(j.employeeId)?.name ?? "")).toLowerCase().includes(jobSearch.toLowerCase()) && (jobStatusFilter === "All statuses" || j.status === jobStatusFilter));
   const nav = [
     { label: "Dashboard", icon: LayoutDashboard },
     { label: "Employees", icon: Users },
