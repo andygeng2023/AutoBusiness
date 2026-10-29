@@ -75,3 +75,142 @@
  .context-sidebar.manual-collapsed:hover .chat-label,.context-sidebar.manual-collapsed:focus-within .chat-label,.context-sidebar.manual-collapsed:hover .quick-link span:nth-child(2),.context-sidebar.manual-collapsed:focus-within .quick-link span:nth-child(2),.context-sidebar.manual-collapsed:hover .employee-row-copy,.context-sidebar.manual-collapsed:focus-within .employee-row-copy,.context-sidebar.manual-collapsed:hover .employee-search,.context-sidebar.manual-collapsed:focus-within .employee-search,.context-sidebar.manual-collapsed:hover .side-card,.context-sidebar.manual-collapsed:focus-within .side-card,.context-sidebar.manual-collapsed:hover .usage-mini,.context-sidebar.manual-collapsed:focus-within .usage-mini,.context-sidebar.manual-collapsed:hover .side-new-button,.context-sidebar.manual-collapsed:focus-within .side-new-button{display:none}
  .context-sidebar.manual-collapsed:hover .chat-list-item,.context-sidebar.manual-collapsed:focus-within .chat-list-item,.context-sidebar.manual-collapsed:hover .quick-link,.context-sidebar.manual-collapsed:focus-within .quick-link,.context-sidebar.manual-collapsed:hover .employee-row,.context-sidebar.manual-collapsed:focus-within .employee-row,.context-sidebar.manual-collapsed:hover .nav-item.subnav,.context-sidebar.manual-collapsed:focus-within .nav-item.subnav{justify-content:center}
 }
+
+
+/* Fixed navigation rails: primary navigation is icon-only; contextual navigation stays expanded. */
+.primary-sidebar,
+.primary-sidebar:hover,
+.primary-sidebar:focus-within,
+.primary-sidebar.manual-collapsed,
+.primary-sidebar.manual-collapsed:hover,
+.primary-sidebar.manual-collapsed:focus-within {
+  width: 76px !important;
+  flex: 0 0 76px !important;
+  min-width: 76px;
+  padding-left: 9px;
+  padding-right: 9px;
+}
+.primary-sidebar .workspace-label,
+.primary-sidebar .nav-item span,
+.primary-sidebar .nav-count {
+  display: none !important;
+}
+.primary-sidebar .nav-item {
+  justify-content: center;
+  gap: 0;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.primary-sidebar .nav-item svg {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+.context-sidebar,
+.context-sidebar:hover,
+.context-sidebar:focus-within,
+.context-sidebar.manual-collapsed,
+.context-sidebar.manual-collapsed:hover,
+.context-sidebar.manual-collapsed:focus-within {
+  width: 264px !important;
+  flex: 0 0 264px !important;
+  min-width: 0;
+  overflow-x: hidden;
+  padding-left: 12px;
+  padding-right: 12px;
+  box-shadow: none;
+}
+.context-sidebar .context-sidebar-heading span,
+.context-sidebar .side-section-head span,
+.context-sidebar .chat-label,
+.context-sidebar .quick-link span:nth-child(2),
+.context-sidebar .quick-link .nav-count,
+.context-sidebar .employee-row-copy,
+.context-sidebar .muted-count,
+.context-sidebar .department-label,
+.context-sidebar .employee-search,
+.context-sidebar .side-card,
+.context-sidebar .usage-mini,
+.context-sidebar .sidebar-company > span:nth-child(2),
+.context-sidebar .sidebar-company > svg,
+.context-sidebar .side-new-button,
+.context-sidebar .nav-item.subnav span {
+  display: revert !important;
+}
+.context-sidebar .context-sidebar-heading span,
+.context-sidebar .side-section-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.context-sidebar .chat-list-item,
+.context-sidebar .quick-link,
+.context-sidebar .employee-row,
+.context-sidebar .nav-item.subnav,
+.context-sidebar .side-new-button {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  justify-content: flex-start;
+  box-sizing: border-box;
+}
+.context-sidebar .chat-label,
+.context-sidebar .employee-row-copy,
+.context-sidebar .quick-link span:nth-child(2),
+.context-sidebar .nav-item.subnav span {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.context-sidebar .chat-label strong,
+.context-sidebar .chat-label small,
+.context-sidebar .employee-row-copy strong,
+.context-sidebar .employee-row-copy small,
+.context-sidebar .quick-link span:nth-child(2),
+.context-sidebar .nav-item.subnav span {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-sidebar .chat-label small {
+  overflow-wrap: anywhere;
+}
+.context-sidebar .side-section-head {
+  min-width: 0;
+}
+.context-sidebar .sidebar-company {
+  justify-content: flex-start;
+  min-width: 0;
+}
+.context-sidebar .sidebar-bottom {
+  min-width: 0;
+}
+@media (max-width: 760px) {
+  .primary-sidebar,
+  .primary-sidebar:hover,
+  .primary-sidebar:focus-within,
+  .primary-sidebar.manual-collapsed,
+  .primary-sidebar.manual-collapsed:hover,
+  .primary-sidebar.manual-collapsed:focus-within {
+    width: 64px !important;
+    flex-basis: 64px !important;
+    min-width: 64px;
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  .context-sidebar,
+  .context-sidebar:hover,
+  .context-sidebar:focus-within,
+  .context-sidebar.manual-collapsed,
+  .context-sidebar.manual-collapsed:hover,
+  .context-sidebar.manual-collapsed:focus-within {
+    left: 64px;
+    width: min(248px, calc(100vw - 64px)) !important;
+    flex-basis: min(248px, calc(100vw - 64px)) !important;
+    min-width: 0;
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+}
