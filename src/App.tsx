@@ -197,7 +197,7 @@ export default function App() {
   const filteredJobs = jobs.filter((j) => (j.title + " " + (j.description ?? "") + " " + (employeeMap.get(j.employeeId)?.name ?? "")).toLowerCase().includes(jobSearch.toLowerCase()) && (jobStatusFilter === "All statuses" || j.status === jobStatusFilter));
   const nav = [
     { label: "Dashboard", icon: LayoutDashboard },
-    { label: "Employees", icon: Users },
+    { label: "Management", icon: Users },
     { label: "Communication", icon: MessageCircle, count: conversations.length },
     { label: "Jobs & approvals", icon: Inbox, count: pendingJobs.length },
     { label: "Settings", icon: Settings2 }
@@ -596,7 +596,7 @@ export default function App() {
     if (!members.length && !children.length) return [];
     return [<div className="department" key={d.id}>
       <div className="department-label" style={{ paddingLeft: 10 + depth * 14 }}><span className="department-dot" />{d.name}<span className="muted-count">{members.length}</span></div>
-      {members.map((e) => <button className={"employee-row " + (selectedEmployee === e.id ? "selected" : "")} key={e.id} onClick={() => setSelectedEmployee(e.id)}><span className={"avatar small " + (e.status === "Working" ? "avatar-violet" : "")}>{initials(e.name)}</span><span className="employee-row-copy"><strong>{e.name}</strong><small>{e.role}</small></span><span className={"status-dot " + e.status.toLowerCase().replace(" ", "-")} /></button>)}
+      {members.map((e) => <button className={"employee-row " + (selectedEmployee === e.id ? "selected" : "")} key={e.id} onClick={() => { setSelectedEmployee(e.id); setProfileEmployeeId(e.id); }}><span className={"avatar small " + (e.status === "Working" ? "avatar-violet" : "")}>{initials(e.name)}</span><span className="employee-row-copy"><strong>{e.name}</strong><small>{e.role}</small></span><span className={"status-dot " + e.status.toLowerCase().replace(" ", "-")} /></button>)}
       {children}
     </div>];
   });
@@ -650,13 +650,13 @@ export default function App() {
         <nav className="primary-nav">{nav.map(({ label, icon: Icon, count }) => <button key={label} title={label} className={"nav-item " + (page === label ? "active" : "")} onClick={() => changePage(label)}><Icon size={17} strokeWidth={1.8} /><span>{label}</span>{count ? <span className="nav-count">{count}</span> : null}</button>)}</nav>
       </aside>
       <aside className={"sidebar context-sidebar " + (sidebarOpen ? "" : "manual-collapsed")}>
-        <div className="context-sidebar-heading"><span>{page === "Communication" ? "COMMUNICATION" : page === "Employees" ? "EMPLOYEES" : page === "Settings" ? "SETTINGS" : page.toUpperCase()}</span></div>
+        <div className="context-sidebar-heading"><span>{page === "Communication" ? "COMMUNICATION" : page === "Management" ? "MANAGEMENT" : page === "Settings" ? "SETTINGS" : page.toUpperCase()}</span></div>
         {page === "Communication" ? <>
           <div className="side-section-head"><span>MESSAGES</span><button className="tiny-icon" onClick={() => setShowChatForm(true)} title="New chat"><Plus size={15} /></button></div>
           {conversations.filter((c) => c.kind === "group").map((c) => <button key={c.id} className={"chat-list-item " + (selectedChat === c.id ? "chosen" : "")} onClick={() => setSelectedChat(c.id)}><span className="chat-avatar team-avatar"><Users size={15} /></span><span className="chat-label"><strong>{c.name}</strong><small>Group conversation</small></span></button>)}
           {conversations.filter((c) => c.kind !== "group").map((c) => <button key={c.id} className={"chat-list-item " + (selectedChat === c.id ? "chosen" : "")} onClick={() => setSelectedChat(c.id)}><span className="avatar tiny">{initials(c.name)}</span><span className="chat-label"><strong>{c.name}</strong><small>{c.messages.at(-1)?.text ?? "Start a conversation"}</small></span></button>)}
           <button className="side-new-button" onClick={() => setShowChatForm(true)}><Plus size={14} /> New conversation</button>
-        </> : page === "Employees" ? <>
+        </> : page === "Management" ? <>
           <div className="side-section-head"><span>YOUR TEAM</span><button className="tiny-icon" onClick={() => setShowEmployeeForm(true)} title="Add employee"><Plus size={15} /></button></div>
           <div className="employee-search"><Search size={14} /><input placeholder="Find an employee" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
           <div className="department-list">{departmentTree()}</div><button className="side-new-button" onClick={() => setShowEmployeeForm(true)}><Plus size={14} /> Add employee</button>
@@ -693,8 +693,8 @@ export default function App() {
             <section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Recent job updates from this workspace.</p></div><Clock3 size={16} className="muted-icon" /></div><div className="activity-list">{jobs.slice(0, 4).map((job) => <div className="activity-item" key={job.id}><span className="activity-bullet violet-bullet">{job.status === "Approved" ? <CheckCheck size={13} /> : <Inbox size={13} />}</span><div><p><strong>{job.title}</strong> · {job.status.toLowerCase()}</p><small>{new Date(job.created).toLocaleString()}</small></div></div>)}{jobs.length === 0 && <div className="empty-state">Job activity will appear here when you assign work.</div>}</div></section>
           </div>
         </div>}
-        {page === "Employees" && <div className="page-wrap employees-page">
-          <div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> People</div><h1>Employees</h1><p>Your AI team, organised by department.</p></div><button className="primary-button" onClick={() => setShowEmployeeForm(true)}><Plus size={16} /> Add employee</button></div>
+        {page === "Management" && <div className="page-wrap management-page">
+          <div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> People</div><h1>Management</h1><p>Your organisation, departments and AI employees.</p></div><button className="primary-button" onClick={() => setShowEmployeeForm(true)}><Plus size={16} /> Add employee</button></div>
           <div className="employee-layout"><div className="panel employee-directory"><div className="directory-top"><div><h2>Team directory</h2><p>{employees.length} employees · {depts.length} departments</p></div><div className="directory-search"><Search size={15} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search team" /></div></div>
             {depts.filter((d) => !d.parentId).map((dept) => { const childDepts = depts.filter((d) => d.parentId === dept.id); const deptEmployees = filteredEmployees.filter((e) => e.deptId === dept.id || childDepts.some((cd) => cd.id === e.deptId)); if (!deptEmployees.length) return null; return <div className="directory-dept" key={dept.id}><div className="directory-dept-title"><span className="department-dot" />{dept.name}<span>{deptEmployees.length}</span></div>{deptEmployees.map((e) => <button key={e.id} className={"directory-person " + (selectedEmployee === e.id ? "selected" : "")} onClick={() => setSelectedEmployee(e.id)}><span className="avatar">{initials(e.name)}</span><span className="directory-person-copy"><strong>{e.name}</strong><small>{e.role} · {depts.find((d) => d.id === e.deptId)?.name}</small></span><span className={"presence " + e.status.toLowerCase().replace(" ", "-")}><i />{e.status}</span><ChevronRight size={15} /></button>)}</div>; })}
           </div>
