@@ -42,7 +42,7 @@ const describeError = (error: unknown, fallback: string) => {
   }
   return fallback;
 };
-declare global { interface Window { puter?: { ai?: { chat: (prompt: string, options?: Record<string, unknown>) => Promise<unknown> } } } }
+declare global { interface Window { puter?: { auth?: { isSignedIn?: () => boolean; signIn?: () => Promise<unknown> }; ai?: { chat: (prompt: string, options?: Record<string, unknown>) => Promise<unknown> } } } }
 
 export default function App() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -330,18 +330,28 @@ export default function App() {
       setBusy(true);
       try {
         let reply = "";
-        if (window.puter?.ai?.chat) {
-          const prompt = "You are " + emp.name + ", " + emp.role + " in a company workspace. Tone: " + emp.tone + ". Custom instructions: " + emp.instructions + ". Current task: " + (emp.task || "none") + ". Respond helpfully and concisely to this message: " + text;
-          const model = emp.model.includes("Claude") ? "claude-sonnet-4" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
-          const result = await window.puter.ai.chat(prompt, { model });
-          reply = typeof result === "string" ? result : String((result as { message?: { content?: unknown } })?.message?.content ?? "I’ve noted that. I’ll review and get back to you.");
-        } else {
-          reply = "I’ve received your message. To enable live AI replies, configure Puter.js in this deployment. I can still track jobs and updates here.";
+        if (!window.puter?.ai?.chat) throw new Error("Puter.js did not load. Refresh the page and try again.");
+        // Puter sign-in is separate from AutoBusiness/Supabase sign-in. Start it from this submit action.
+        if (window.puter.auth?.isSignedIn && !window.puter.auth.isSignedIn()) {
+          if (!window.puter.auth.signIn) throw new Error("Puter sign-in is unavailable. Refresh the page and try again.");
+          await window.puter.auth.signIn();
         }
+        const prompt = "You are " + emp.name + ", " + emp.role + " in a company workspace. Tone: " + emp.tone + ". Custom instructions: " + emp.instructions + ". Current task: " + (emp.task || "none") + ". Respond helpfully and concisely to this message: " + text;
+        const model = emp.model.includes("Claude") ? "claude-sonnet-4" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
+        const result = await window.puter.ai.chat(prompt, { model, normalize: true });
+        const content = (result as { message?: { content?: unknown } })?.message?.content;
+        reply = typeof result === "string" ? result : typeof content === "string" ? content : Array.isArray(content) ? content.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "").join("\n") : "";
+        if (!reply.trim()) throw new Error("Puter returned an empty reply. Check your Puter account and try again.");
         const response: Message = { id: crypto.randomUUID(), from: emp.id, text: reply, time: nowTime(), createdAt: new Date().toISOString() };
         setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, response] } : c));
-      } catch {
-        setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: emp.id, text: "I couldn’t reach the AI provider just now. Your message is saved; please try again shortly.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
+      } catch (error) {
+        const reason = describeError(error, "Unknown Puter error");
+        const detail = /popup_blocked/i.test(reason)
+          ? "Puter sign-in popup was blocked. Allow pop-ups for this site, then send your message again."
+          : /auth_window_closed/i.test(reason)
+            ? "Puter sign-in was cancelled. Sign in to Puter to receive AI replies."
+            : "Puter AI request failed: " + reason;
+        setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: emp.id, text: detail + " Your original message is saved.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
       } finally { setBusy(false); }
     } else if (activeConversation.kind === "private" && activeConversation.members.length === 1) {
       notify("Message saved, but Puter AI is disabled in Settings.");
@@ -356,10 +366,16 @@ export default function App() {
     if (!window.puter?.ai?.chat) { notify("AI execution is unavailable: Puter.js did not load"); return; }
     setBusy(true);
     try {
+      // This runs from the user's Run/Retry click, allowing Puter to open its sign-in popup.
+      if (window.puter.auth?.isSignedIn && !window.puter.auth.isSignedIn()) {
+        if (!window.puter.auth.signIn) throw new Error("Puter sign-in is unavailable. Refresh the page and try again.");
+        await window.puter.auth.signIn();
+      }
       const prompt = "You are " + emp.name + ", " + emp.role + " working on a delegated job in a company workspace. Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\n\nJOB: " + job.title + "\n\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\n\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\n\nProduce the actual deliverable for this job, not a plan to do it. Use clear headings and concrete content. Address any previous review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly.";
       const model = emp.model.includes("Claude") ? "claude-sonnet-4" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
-      const response = await window.puter.ai.chat(prompt, { model });
-      const output = typeof response === "string" ? response : String((response as { message?: { content?: unknown } })?.message?.content ?? "");
+      const response = await window.puter.ai.chat(prompt, { model, normalize: true });
+      const content = (response as { message?: { content?: unknown } })?.message?.content;
+      const output = typeof response === "string" ? response : typeof content === "string" ? content : Array.isArray(content) ? content.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "").join("\n") : "";
       if (!output.trim()) throw new Error("The AI provider returned an empty deliverable.");
       setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Submitted", result: output, submittedAt: new Date().toISOString() } : j));
       setEmployees((old) => old.map((e) => e.id === emp.id ? { ...e, status: "Needs review", task: job.title } : e));
@@ -367,7 +383,8 @@ export default function App() {
       setSelectedJobId(jobId);
       notify("Deliverable created — review the work");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not execute this job");
+      const reason = describeError(error, "Unknown Puter error");
+      notify(/popup_blocked/i.test(reason) ? "Puter sign-in popup was blocked. Allow pop-ups for this site and retry." : /auth_window_closed/i.test(reason) ? "Puter sign-in was cancelled. Sign in to Puter before running AI jobs." : "AI job failed: " + reason);
     } finally { setBusy(false); }
   };
   const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
