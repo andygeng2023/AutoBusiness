@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Activity, ArrowDownLeft, ArrowLeft, ArrowUpRight, Bot, Building2, Check,
   CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Gauge,
-  Inbox, LayoutDashboard, LockKeyhole, MessageCircle, MoreHorizontal, Plus,
+  Inbox, LayoutDashboard, LockKeyhole, Menu, MessageCircle, MoreHorizontal, Plus,
   Search, Send, Settings2, ShieldCheck, Sparkles, Users, Workflow, Zap
 } from "lucide-react";
 import "./styles.css";
@@ -32,6 +32,34 @@ const seedEmployees: Employee[] = [
   { id: "jules", name: "Jules Park", role: "Product Designer", deptId: "design", tone: "Curious & collaborative", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Explain trade-offs and design for accessibility.", status: "Available" }
 ];
 const defaultSettings: Settings = { approvalRequired: true, dailyLimit: 50, monthlyLimit: 900, autoRun: false, connectors: ["OpenRouter", "Supabase"] };
+const demoCompany: Company = { id: "demo-company", name: "Northstar Studio", industry: "Creative services", initials: "NS", color: "blue", description: "Interactive sample workspace" };
+const makeDemoJobs = (): Job[] => {
+  const now = Date.now();
+  const yesterday = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+  const twoDaysAgo = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString();
+  return [
+    { id: "demo-job-review", title: "Q4 campaign positioning", description: "Recommend a positioning direction for a small creative studio, including audience, message, and proof points.", employeeId: "leo", status: "Submitted", priority: "Urgent", created: yesterday, submittedAt: yesterday, result: "# Q4 campaign positioning\n\n**Recommendation:** Lead with a clear, customer-centred promise and support it with practical evidence.\n\n## Audience\nSmall teams that need reliable creative support without adding operational complexity.\n\n## Message\nMake the next stage of growth easier to execute.\n\n## Next steps\nValidate the message with three existing customers, then use their language in the landing page and campaign brief.\n\n*This is illustrative demo content, not generated business advice.*" },
+    { id: "demo-job-queued", title: "Benchmark competitor onboarding", description: "Prepare a concise comparison checklist for evaluating competitor onboarding flows.", employeeId: "maya", status: "Queued", priority: "Normal", created: new Date(now - 30 * 60 * 1000).toISOString() },
+    { id: "demo-job-progress", title: "Outline customer onboarding", description: "Draft an onboarding sequence with the first three customer milestones.", employeeId: "amara", status: "In progress", priority: "Normal", created: new Date(now - 3 * 60 * 60 * 1000).toISOString() },
+    { id: "demo-job-approved", title: "Weekly growth summary", description: "Summarise the signals to check in a weekly growth review.", employeeId: "noah", status: "Approved", priority: "Normal", created: twoDaysAgo, submittedAt: twoDaysAgo, result: "# Weekly growth summary\n\nReview acquisition, activation, retention, and conversion as separate stages. For each stage, record the baseline, the change from the prior period, and the next experiment.\n\n*Illustrative demo content.*" }
+  ];
+};
+const makeDemoConversations = (): Conversation[] => [
+  { id: "demo-group", name: "Company team", kind: "group", members: ["maya", "leo", "amara", "noah"], messages: [
+    { id: "demo-msg-1", from: "you", text: "Can we agree on one clear message for the next campaign?", time: "09:14", createdAt: new Date(Date.now() - 90 * 60 * 1000).toISOString() },
+    { id: "demo-msg-2", from: "leo", text: "I’m comparing the current positioning with the questions customers ask most often. I’ll bring a recommendation and supporting points back for review.", time: "09:16", createdAt: new Date(Date.now() - 88 * 60 * 1000).toISOString() },
+    { id: "demo-msg-3", from: "noah", text: "I’ll check which measures could tell us whether the message is working, rather than relying on clicks alone.", time: "09:18", createdAt: new Date(Date.now() - 86 * 60 * 1000).toISOString() }
+  ] },
+  { id: "demo-private-leo", name: "Leo Martin", kind: "private", members: ["leo"], messages: [
+    { id: "demo-msg-4", from: "you", text: "Please keep recommendations practical and explain the trade-offs.", time: "Yesterday", createdAt: new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString() },
+    { id: "demo-msg-5", from: "leo", text: "Understood. I’ll distinguish the strongest option from the alternatives and note what evidence would validate the choice.", time: "Yesterday", createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString() }
+  ] },
+  { id: "demo-private-maya", name: "Maya Chen", kind: "private", members: ["maya"], messages: [] }
+];
+const makeDemoGoals = (): Goal[] => [
+  { id: "demo-goal-1", title: "Clarify our core positioning", description: "Validate the main value proposition with customers.", progress: 65, dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), status: "active" },
+  { id: "demo-goal-2", title: "Make onboarding more consistent", description: "Document a simple first-week customer journey.", progress: 30, status: "active" }
+];
 const fallbackFreeModels = [{ id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B (free)" }, { id: "google/gemma-3-27b-it:free", name: "Gemma 3 27B (free)" }, { id: "deepseek/deepseek-r1-0528:free", name: "DeepSeek R1 (free)" }];
 const openRouterKeyName = "autobusiness_openrouter_api_key";
 const initials = (name: string) => name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
@@ -66,6 +94,9 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [mobileContextOpen, setMobileContextOpen] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
@@ -88,7 +119,6 @@ export default function App() {
   const [goalDescription, setGoalDescription] = useState("");
   const [goalDueDate, setGoalDueDate] = useState("");
   const [page, setPage] = useState("Dashboard");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedEmployee, setSelectedEmployee] = useState("maya");
   const [selectedChat, setSelectedChat] = useState("");
   const [showChatDetails, setShowChatDetails] = useState(false);
@@ -140,7 +170,7 @@ export default function App() {
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
   useEffect(() => {
-    if (!user) return;
+    if (!user || demoMode) return;
     let active = true;
     setLoadingCompanies(true);
     supabase.from("companies").select("id,name,industry,created_by,created_at").order("created_at", { ascending: false }).then(({ data, error }) => {
@@ -152,22 +182,22 @@ export default function App() {
     return () => { active = false; };
   }, [user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     const companyId = company.id;
     void supabase.from("departments").upsert(depts.map((d) => ({ id: d.id, company_id: companyId, name: d.name, parent_id: d.parentId ?? null })), { onConflict: "id" }).then(({ error }) => { if (error && depts.length) notify("Department save failed: " + error.message); });
   }, [depts, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     const companyId = company.id;
     void supabase.from("employees").upsert(employees.map((e) => ({ id: e.id, company_id: companyId, department_id: e.deptId || null, name: e.name, role: e.role, tone: e.tone, model: e.model, custom_instructions: e.instructions, status: e.status === "Needs review" ? "needs_review" : e.status.toLowerCase(), current_task: e.task ?? null, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && employees.length) notify("Employee save failed: " + error.message); });
   }, [employees, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     const companyId = company.id;
     void supabase.from("jobs").upsert(jobs.map((j) => ({ id: j.id, company_id: companyId, employee_id: j.employeeId || null, title: j.title, description: j.description ?? "", status: j.status.toLowerCase().replace(" ", "_"), priority: j.priority.toLowerCase(), result: j.result ?? "", created_by: j.createdBy ?? user.id, reviewed_by: j.reviewedBy ?? (j.status === "Approved" ? user.id : null), created_at: j.created && !Number.isNaN(Date.parse(j.created)) ? new Date(j.created).toISOString() : new Date().toISOString(), submitted_at: j.submittedAt ? (Number.isNaN(Date.parse(j.submittedAt)) ? new Date().toISOString() : new Date(j.submittedAt).toISOString()) : null, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && jobs.length) notify("Job save failed: " + error.message); });
   }, [jobs, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     const companyId = company.id;
     const rows = conversations.flatMap((c) => c.messages.filter((m) => m.from !== "teammate" && m.from !== "system").map((m) => ({
       id: m.id, company_id: companyId, conversation_id: c.id,
@@ -178,15 +208,15 @@ export default function App() {
     if (rows.length) void supabase.from("messages").upsert(rows, { onConflict: "id", ignoreDuplicates: true }).then(({ error }) => { if (error) notify("Message save failed: " + error.message); });
   }, [conversations, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     void supabase.from("workspace_settings").upsert({ company_id: company.id, approval_required: settings.approvalRequired, auto_run: settings.autoRun, daily_usage_limit: settings.dailyLimit, monthly_usage_limit: settings.monthlyLimit, enabled_connectors: settings.connectors.map((c) => (({ "OpenRouter": "openrouter" } as Record<string, string>)[c] ?? c.toLowerCase().replaceAll(" ", "_"))) }, { onConflict: "company_id" }).then(({ error }) => { if (error) notify("Settings save failed: " + error.message); });
   }, [settings, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     void supabase.from("goals").upsert(goals.map((g) => ({ id: g.id, company_id: company.id, title: g.title, description: g.description, progress: g.progress, due_date: g.dueDate || null, status: g.status, created_by: g.createdBy ?? user.id, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && goals.length) notify("Goal save failed: " + error.message); });
   }, [goals, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     void supabase.from("companies").update({ name: company.name, industry: company.industry, updated_at: new Date().toISOString() }).eq("id", company.id).then(({ error }) => { if (error) notify("Company settings save failed: " + error.message); });
   }, [company?.name, company?.industry, loadedCompanyId, user?.id]);
   useEffect(() => { if (toast) { const timer = window.setTimeout(() => setToast(""), 2800); return () => window.clearTimeout(timer); } }, [toast]);
@@ -206,6 +236,18 @@ export default function App() {
   ];
 
   const notify = (text: string) => setToast(text);
+  const startInteractiveDemo = () => {
+    setDemoMode(true);
+    setUser({ id: "demo-user", email: "demo@autobusiness.local" });
+    setCompanies([{ ...demoCompany }]); setCompany({ ...demoCompany }); setLoadedCompanyId(demoCompany.id);
+    setDepts(seedDepts.map((department) => ({ ...department })));
+    setEmployees(seedEmployees.map((employee) => ({ ...employee })));
+    setJobs(makeDemoJobs()); setConversations(makeDemoConversations()); setGoals(makeDemoGoals());
+    setSettings({ ...defaultSettings }); setMemberRole("owner");
+    setSelectedEmployee("maya"); setJobEmployee("maya"); setNewEmployeeDept("leadership"); setSelectedChat("demo-group");
+    setPage("Dashboard"); setMobileContextOpen(false); setAuthError(""); setAuthNotice(""); setToast(""); setSelectedJobId(null);
+    setShowJobForm(false); setShowEmployeeForm(false); setShowCompanyForm(false); setShowChatForm(false); setShowGoalForm(false); setShowInviteForm(false);
+  };
   const handleAuthSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setAuthError(""); setAuthNotice("");
@@ -226,11 +268,26 @@ export default function App() {
     } finally { setAuthBusy(false); }
   };
   const signOut = async () => {
+    if (demoMode) {
+      setDemoMode(false); setCompany(null); setCompanies([]); setLoadedCompanyId(null); setUser(null);
+      setDepts([]); setEmployees([]); setJobs([]); setConversations([]); setGoals([]); setSettings(defaultSettings);
+      setSelectedChat(""); setSelectedEmployee("maya"); setPage("Dashboard"); setMobileContextOpen(false); setToast("");
+      return;
+    }
     const { error } = await supabase.auth.signOut();
     if (error) notify("Could not sign out: " + error.message);
     else { setCompany(null); setLoadedCompanyId(null); setCompanies([]); setUser(null); }
   };
   const openCompany = async (item: Company) => {
+    if (demoMode) {
+      setCompany(item); setLoadingWorkspace(false); setPage("Dashboard"); setLoadedCompanyId(item.id);
+      setDepts(seedDepts.map((department) => ({ ...department })));
+      setEmployees(seedEmployees.map((employee) => ({ ...employee })));
+      setJobs(makeDemoJobs()); setConversations(makeDemoConversations()); setGoals(makeDemoGoals());
+      setSettings({ ...defaultSettings }); setMemberRole("owner");
+      setSelectedEmployee("maya"); setJobEmployee("maya"); setNewEmployeeDept("leadership"); setSelectedChat("demo-group");
+      return;
+    }
     setCompany(item);
     setLoadedCompanyId(null);
     setLoadingWorkspace(true);
@@ -302,7 +359,7 @@ export default function App() {
   };
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("invite");
-    if (!user || !token || inviteHandledRef.current) return;
+    if (demoMode || !user || !token || inviteHandledRef.current) return;
     inviteHandledRef.current = true;
     const accept = async () => {
       try {
@@ -323,7 +380,11 @@ export default function App() {
     };
     void accept();
   }, [user?.id]);
-  const changePage = (next: string) => { setPage(next); if (next === "Communication") setSelectedChat(conversations.find((c) => c.kind === "group")?.id ?? conversations[0]?.id ?? ""); };
+  const changePage = (next: string) => {
+    setPage(next);
+    setMobileContextOpen(true);
+    if (next === "Communication") setSelectedChat(conversations.find((c) => c.kind === "group")?.id ?? conversations[0]?.id ?? "");
+  };
   const createJob = (event: FormEvent) => {
     event.preventDefault();
     if (!jobTitle.trim() || !company || !user || !jobEmployee) { notify("Create an employee before assigning a job"); return; }
@@ -335,7 +396,7 @@ export default function App() {
     };
     if (jobs.filter((job) => countInPeriod(job, "day")).length >= settings.dailyLimit) { notify("Daily job creation limit reached. Increase the limit in Settings to assign more work."); return; }
     if (jobs.filter((job) => countInPeriod(job, "month")).length >= settings.monthlyLimit) { notify("Monthly job creation limit reached. Increase the limit in Settings to assign more work."); return; }
-    const job: Job = { id: crypto.randomUUID(), title: jobTitle.trim(), description: jobDescription.trim(), employeeId: jobEmployee, status: settings.autoRun || !settings.approvalRequired ? "In progress" : "Queued", priority: jobPriority, created: new Date().toISOString(), createdBy: user.id };
+    const job: Job = { id: crypto.randomUUID(), title: jobTitle.trim(), description: jobDescription.trim(), employeeId: jobEmployee, status: settings.approvalRequired ? "Queued" : "In progress", priority: jobPriority, created: new Date().toISOString(), createdBy: user.id };
     setJobs((old) => [job, ...old]);
     setEmployees((old) => old.map((e) => e.id === jobEmployee ? { ...e, status: job.status === "Queued" ? "Available" : "Working", task: job.title } : e));
     setJobTitle(""); setJobDescription(""); setJobPriority("Normal"); setShowJobForm(false); notify(settings.approvalRequired ? "Job queued for approval" : "Job assigned");
@@ -347,6 +408,33 @@ export default function App() {
     setMessage("");
     const sent: Message = { id: crypto.randomUUID(), from: "you", text, time: nowTime(), createdAt: new Date().toISOString() };
     setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, sent] } : c));
+
+    if (demoMode) {
+      const responder = (activeConversation.kind === "group"
+        ? activeConversation.members.map((id) => employeeMap.get(id)).find((employee) => employee && employee.status !== "Paused")
+        : employeeMap.get(activeConversation.members[0])) ?? employees.find((employee) => employee.status !== "Paused");
+      if (!responder) { notify("No available demo employees are members of this conversation."); return; }
+      const asksForWork = /\b(plan|draft|write|research|prepare|analyse|analyze|report|build|create|design|audit|summari[sz]e|launch|compare)\b/i.test(text);
+      if (asksForWork) {
+        const title = text.length > 84 ? text.slice(0, 81).trimEnd() + "…" : text;
+        const job: Job = {
+          id: crypto.randomUUID(), title, description: text, employeeId: responder.id, status: "Submitted",
+          priority: "Normal", created: new Date().toISOString(), submittedAt: new Date().toISOString(),
+          createdBy: user?.id,
+          result: "# Demo deliverable\n\nThis is a simulated deliverable created to demonstrate the review workflow. No external AI service was called.\n\n## Request\n" + text + "\n\n## Suggested next steps\nReview the result, add revision feedback if needed, or approve it to complete the workflow."
+        };
+        setJobs((old) => [job, ...old]);
+        setEmployees((old) => old.map((employee) => employee.id === responder.id ? { ...employee, status: "Needs review", task: title } : employee));
+        const response: Message = { id: crypto.randomUUID(), from: responder.id, text: "[Demo] I’ve prepared a sample deliverable for “" + title + "”. It is ready for your review.", time: nowTime(), createdAt: new Date().toISOString(), jobId: job.id };
+        setConversations((old) => old.map((conversation) => conversation.id === activeConversation.id ? { ...conversation, messages: [...conversation.messages, response] } : conversation));
+        setSelectedJobId(job.id); setPage("Jobs & approvals"); setMobileContextOpen(false);
+        notify("Demo deliverable ready for review");
+      } else {
+        const response: Message = { id: crypto.randomUUID(), from: responder.id, text: "[Demo reply] I’ve taken the earlier conversation and sample assignments into account. In a live workspace, this response would come from the configured AI provider.", time: nowTime(), createdAt: new Date().toISOString() };
+        setConversations((old) => old.map((conversation) => conversation.id === activeConversation.id ? { ...conversation, messages: [...conversation.messages, response] } : conversation));
+      }
+      return;
+    }
 
     if (!settings.connectors.includes("OpenRouter")) { notify("Message saved. Enable OpenRouter in Settings to receive AI replies."); return; }
     if (!openRouterKey.trim()) { notify("Add your OpenRouter API key in Settings → Connectors first."); setPage("Settings"); setActiveSettings("Connectors"); return; }
@@ -461,6 +549,15 @@ export default function App() {
     }
   };
   const runJob = async (jobId: string, feedbackOverride?: string) => {
+    if (demoMode) {
+      const job = jobs.find((item) => item.id === jobId);
+      if (!job || busy) return;
+      const output = "# Demo deliverable: " + job.title + "\n\nThis is simulated output for the interactive demo. No external AI service was called.\n\n## Brief\n" + (job.description || "No additional brief supplied.") + "\n\n## Proposed result\n\n1. Confirm the intended outcome and audience.\n2. Prepare a first version that meets the brief.\n3. Review assumptions and revise before approving.\n\n## Review checklist\n\n- Does the result meet the brief?\n- Are assumptions and limitations explicit?\n- What would improve the next iteration?";
+      setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Submitted", result: output, submittedAt: new Date().toISOString() } : item));
+      setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Needs review", task: job.title } : employee));
+      setSelectedJobId(jobId); notify("Demo deliverable created — review the work");
+      return;
+    }
     if (!settings.connectors.includes("OpenRouter")) { notify("Enable OpenRouter in Settings before running AI jobs"); return; }
     if (!openRouterKey.trim()) { notify("Add your OpenRouter API key in Settings → Connectors first."); setPage("Settings"); setActiveSettings("Connectors"); return; }
     const job = jobs.find((j) => j.id === jobId);
@@ -486,12 +583,19 @@ export default function App() {
   const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
   const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress" } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
   const requestRevision = (jobId: string) => { if (!reviewNote.trim()) { notify("Add a note explaining what needs to change"); return; } setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Rejected", reviewNote: reviewNote.trim() } : j)); notify("Revision requested — feedback saved to the job"); };
-  const deleteJob = async (jobId: string) => { if (company) { const { error } = await supabase.from("jobs").delete().eq("id", jobId).eq("company_id", company.id); if (error) { notify("Could not delete job: " + error.message); return; } } setJobs((old) => old.filter((j) => j.id !== jobId)); setSelectedJobId((current) => current === jobId ? null : current); notify("Job deleted"); };
+  const deleteJob = async (jobId: string) => { if (company && !demoMode) { const { error } = await supabase.from("jobs").delete().eq("id", jobId).eq("company_id", company.id); if (error) { notify("Could not delete job: " + error.message); return; } } setJobs((old) => old.filter((j) => j.id !== jobId)); setSelectedJobId((current) => current === jobId ? null : current); notify(demoMode ? "Demo job removed for this session" : "Job deleted"); };
   const createCompany = async (event: FormEvent) => {
     event.preventDefault();
     if (!companyName.trim()) return;
     setAuthBusy(true);
     try {
+      if (demoMode) {
+        const name = companyName.trim();
+        const item: Company = { id: crypto.randomUUID(), name, industry: "Demo workspace", initials: initials(name), color: "blue", description: "Session-only demo workspace" };
+        setCompanies((old) => [item, ...old]); setCompanyName(""); setShowCompanyForm(false);
+        await openCompany(item); notify("Demo workspace created for this session");
+        return;
+      }
       // Read the current authenticated identity immediately before the insert so the
       // RLS ownership check uses the same user as the access token sent by Supabase.
       const { data: authData, error: authError } = await supabase.auth.getUser();
@@ -530,13 +634,15 @@ export default function App() {
     event.preventDefault();
     if (!company || !user || !goalTitle.trim()) return;
     const goal: Goal = { id: crypto.randomUUID(), title: goalTitle.trim(), description: goalDescription.trim(), progress: 0, dueDate: goalDueDate || undefined, status: "active", createdBy: user.id };
-    const { error } = await supabase.from("goals").insert({ id: goal.id, company_id: company.id, title: goal.title, description: goal.description, progress: 0, due_date: goal.dueDate ?? null, status: goal.status, created_by: user.id });
-    if (error) { notify("Could not create goal: " + error.message); return; }
+    if (!demoMode) {
+      const { error } = await supabase.from("goals").insert({ id: goal.id, company_id: company.id, title: goal.title, description: goal.description, progress: 0, due_date: goal.dueDate ?? null, status: goal.status, created_by: user.id });
+      if (error) { notify("Could not create goal: " + error.message); return; }
+    }
     setGoals((old) => [goal, ...old]); setGoalTitle(""); setGoalDescription(""); setGoalDueDate(""); setShowGoalForm(false); notify("Goal created");
   };
   const createInvite = async (event: FormEvent) => {
     event.preventDefault();
-    if (!company || !user || !inviteEmail.trim()) return;
+    if (demoMode || !company || !user || !inviteEmail.trim()) return;
     setInviteBusy(true);
     try {
       const random = crypto.getRandomValues(new Uint8Array(32));
@@ -568,11 +674,13 @@ export default function App() {
     const members = newChatMembers.length ? newChatMembers : employees[0] ? [employees[0].id] : [];
     const id = crypto.randomUUID();
     const chat: Conversation = { id, name: newChatName.trim(), kind: members.length > 1 ? "group" : "private", members, messages: [], createdBy: user.id };
-    const { error } = await supabase.from("conversations").insert({ id, company_id: company.id, name: chat.name, kind: chat.kind, created_by: user.id });
-    if (error) { notify("Could not create conversation: " + error.message); return; }
-    const membershipRows = [{ company_id: company.id, conversation_id: id, user_id: user.id, employee_id: null }, ...members.map((employeeId) => ({ company_id: company.id, conversation_id: id, user_id: null, employee_id: employeeId }))];
-    const { error: membershipError } = await supabase.from("conversation_members").insert(membershipRows);
-    if (membershipError) { notify("Conversation created, but members could not be added: " + membershipError.message); }
+    if (!demoMode) {
+      const { error } = await supabase.from("conversations").insert({ id, company_id: company.id, name: chat.name, kind: chat.kind, created_by: user.id });
+      if (error) { notify("Could not create conversation: " + error.message); return; }
+      const membershipRows = [{ company_id: company.id, conversation_id: id, user_id: user.id, employee_id: null }, ...members.map((employeeId) => ({ company_id: company.id, conversation_id: id, user_id: null, employee_id: employeeId }))];
+      const { error: membershipError } = await supabase.from("conversation_members").insert(membershipRows);
+      if (membershipError) { notify("Conversation created, but members could not be added: " + membershipError.message); }
+    }
     setConversations((old) => [chat, ...old]); setSelectedChat(id); setNewChatName(""); setNewChatMembers([]); setShowChatForm(false); setPage("Communication");
   };
   const openChatWith = async (id: string) => {
@@ -582,10 +690,12 @@ export default function App() {
       if (!company || !user) return;
       const e = employeeMap.get(id); const conversationId = crypto.randomUUID();
       const created: Conversation = { id: conversationId, name: e?.name ?? "Employee", kind: "private", members: [id], messages: [], createdBy: user.id };
-      const { error } = await supabase.from("conversations").insert({ id: conversationId, company_id: company.id, name: created.name, kind: "private", created_by: user.id });
-      if (error) { notify("Could not open conversation: " + error.message); return; }
-      const { error: membershipError } = await supabase.from("conversation_members").insert([{ company_id: company.id, conversation_id: conversationId, user_id: user.id, employee_id: null }, { company_id: company.id, conversation_id: conversationId, user_id: null, employee_id: id }]);
-      if (membershipError) { notify("Could not add conversation members: " + membershipError.message); return; }
+      if (!demoMode) {
+        const { error } = await supabase.from("conversations").insert({ id: conversationId, company_id: company.id, name: created.name, kind: "private", created_by: user.id });
+        if (error) { notify("Could not open conversation: " + error.message); return; }
+        const { error: membershipError } = await supabase.from("conversation_members").insert([{ company_id: company.id, conversation_id: conversationId, user_id: user.id, employee_id: null }, { company_id: company.id, conversation_id: conversationId, user_id: null, employee_id: id }]);
+        if (membershipError) { notify("Could not add conversation members: " + membershipError.message); return; }
+      }
       setConversations((old) => [created, ...old]); setSelectedChat(created.id);
     }
     setPage("Communication");
@@ -598,7 +708,7 @@ export default function App() {
     if (!members.length && !children.length) return [];
     return [<div className="department" key={d.id}>
       <div className="department-label" style={{ paddingLeft: 10 + depth * 14 }}><span className="department-dot" />{d.name}<span className="muted-count">{members.length}</span></div>
-      {members.map((e) => <button className={"employee-row " + (selectedEmployee === e.id ? "selected" : "")} key={e.id} onClick={() => { setSelectedEmployee(e.id); setProfileEmployeeId(e.id); }}><span className={"avatar small " + (e.status === "Working" ? "avatar-violet" : "")}>{initials(e.name)}</span><span className="employee-row-copy"><strong>{e.name}</strong><small>{e.role}</small></span><span className={"status-dot " + e.status.toLowerCase().replace(" ", "-")} /></button>)}
+      {members.map((e) => <button className={"employee-row " + (selectedEmployee === e.id ? "selected" : "")} key={e.id} onClick={() => { setSelectedEmployee(e.id); setProfileEmployeeId(e.id); setMobileContextOpen(false); }}><span className={"avatar small " + (e.status === "Working" ? "avatar-violet" : "")}>{initials(e.name)}</span><span className="employee-row-copy"><strong>{e.name}</strong><small>{e.role}</small></span><span className={"status-dot " + e.status.toLowerCase().replace(" ", "-")} /></button>)}
       {children}
     </div>];
   });
@@ -618,6 +728,7 @@ export default function App() {
           {authNotice && <p className="auth-notice" role="status">{authNotice}</p>}
           <button className="primary-button auth-submit" type="submit" disabled={authBusy}>{authBusy ? "Please wait…" : authMode === "signin" ? "Sign in" : "Create account"}</button>
         </form>
+        <div className="auth-demo-actions"><button type="button" className="secondary-button demo-launch-button" onClick={startInteractiveDemo}><Sparkles size={15} /> Explore interactive demo</button><p>Sample company and tasks. Changes stay in this session and are not saved to an account.</p></div>
         <p className="auth-switch">{authMode === "signin" ? "New to AutoBusiness?" : "Already have an account?"} <button type="button" onClick={() => { setAuthMode(authMode === "signin" ? "signup" : "signin"); setAuthError(""); setAuthNotice(""); }}>{authMode === "signin" ? "Create an account" : "Sign in instead"}</button></p>
         <div className="auth-security-note"><LockKeyhole size={14} /> Your company data is stored in Supabase and protected by company membership policies.</div>
       </div>
@@ -643,18 +754,18 @@ export default function App() {
   if (loadingWorkspace && company) return <div className="home-shell auth-loading"><div className="brand"><span className="brand-mark"><Command size={19} /></span><span>autobusiness</span></div><p>Loading {company.name} from the cloud…</p></div>;
   return <div className="app-shell">
     <header className="app-topbar">
-      <div className="topbar-left"><button className="icon-button menu-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar"><Command size={18} /></button><div className="brand compact"><span className="brand-mark"><Command size={17} /></span><span>autobusiness</span></div><span className="topbar-divider" /><button className="company-switcher" onClick={() => { setLoadedCompanyId(null); setCompany(null); }}><span className={"company-mini " + company.color}>{company.initials}</span>{company.name}<ChevronDown size={14} /></button></div>
-      <div className="topbar-right"><span className="saved-indicator"><span className="online-dot" /> Supabase connected</span><button className="icon-button" title="Help" onClick={() => notify("Help centre coming soon")}><CircleHelp size={17} /></button><button className="profile-button" title={"Sign out " + (user?.email ?? "")} onClick={() => void signOut()}>{initials(user?.email?.split("@")[0] ?? "U")}</button></div>
+      <div className="topbar-left"><button className="icon-button menu-toggle" onClick={() => setMobileContextOpen((open) => !open)} aria-label={mobileContextOpen ? "Close contextual navigation" : "Open contextual navigation"} aria-expanded={mobileContextOpen}><Menu size={18} /></button><div className="brand compact"><span className="brand-mark"><Command size={17} /></span><span>autobusiness</span></div><span className="topbar-divider" /><button className="company-switcher" onClick={() => { setLoadedCompanyId(null); setCompany(null); }}><span className={"company-mini " + company.color}>{company.initials}</span>{company.name}<ChevronDown size={14} /></button></div>
+      <div className="topbar-right">{demoMode ? <><span className="demo-status"><span className="demo-dot" /> Demo · session only</span><button className="demo-exit-button" onClick={() => void signOut()}>Exit demo</button></> : <><span className="saved-indicator"><span className="online-dot" /> Supabase connected</span><button className="profile-button" title={"Sign out " + (user?.email ?? "")} onClick={() => void signOut()}>{initials(user?.email?.split("@")[0] ?? "U")}</button></>}<button className="icon-button" title="Help and quick guide" aria-label="Help and quick guide" onClick={() => setShowHelp(true)}><CircleHelp size={17} /></button></div>
     </header>
     <div className="app-body">
-      <aside className={"sidebar primary-sidebar " + (sidebarOpen ? "" : "manual-collapsed")}>
+      <aside className="sidebar primary-sidebar">
         <div className="workspace-label">WORKSPACE</div>
         <nav className="primary-nav">{nav.map(({ label, icon: Icon, count }) => <button key={label} title={label} className={"nav-item " + (page === label ? "active" : "")} onClick={() => changePage(label)}><Icon size={17} strokeWidth={1.8} /><span>{label}</span>{count ? <span className="nav-count">{count}</span> : null}</button>)}</nav>
       </aside>
-      <aside className={"sidebar context-sidebar " + (sidebarOpen ? "" : "manual-collapsed")}>
+      <aside className={"sidebar context-sidebar " + (mobileContextOpen ? "mobile-open" : "")}>
         <div className="context-sidebar-heading"><span>{page === "Communication" ? "COMMUNICATION" : page === "Management" ? "MANAGEMENT" : page === "Settings" ? "SETTINGS" : page.toUpperCase()}</span></div>
         {page === "Communication" ? <>
-          <div className="side-section-head"><span>MESSAGES</span><button className="tiny-icon" onClick={() => setShowChatForm(true)} title="New chat"><Plus size={15} /></button></div>
+          <div className="side-section-head"><span>CONVERSATIONS</span><button className="tiny-icon" onClick={() => { setShowChatForm(true); setMobileContextOpen(false); }} title="New conversation"><Plus size={15} /></button></div>
           {conversations.filter((c) => c.kind === "group").map((c) => <button key={c.id} className={"chat-list-item " + (selectedChat === c.id ? "chosen" : "")} onClick={() => setSelectedChat(c.id)}><span className="chat-avatar team-avatar"><Users size={15} /></span><span className="chat-label"><strong>{c.name}</strong><small>Group conversation</small></span></button>)}
           {conversations.filter((c) => c.kind !== "group").map((c) => <button key={c.id} className={"chat-list-item " + (selectedChat === c.id ? "chosen" : "")} onClick={() => setSelectedChat(c.id)}><span className="avatar tiny">{initials(c.name)}</span><span className="chat-label"><strong>{c.name}</strong><small>{c.messages.at(-1)?.text ?? "Start a conversation"}</small></span></button>)}
           <button className="side-new-button" onClick={() => setShowChatForm(true)}><Plus size={14} /> New conversation</button>
@@ -664,7 +775,7 @@ export default function App() {
           <div className="department-list">{departmentTree()}</div><button className="side-new-button" onClick={() => setShowEmployeeForm(true)}><Plus size={14} /> Add employee</button>
         </> : page === "Settings" ? <>
           <div className="side-section-head"><span>SETTINGS</span></div>
-          {[{ label: "General", icon: Settings2 }, { label: "Security", icon: ShieldCheck }, { label: "Rulesets", icon: LockKeyhole }, { label: "Connectors", icon: Workflow }, { label: "Automation & limits", icon: Gauge }].map(({ label, icon: SettingIcon }) => <button key={label} title={label} className={"nav-item subnav " + (activeSettings === label ? "active" : "")} onClick={() => setActiveSettings(label)}><SettingIcon size={20} /><span>{label}</span></button>)}
+          {[{ label: "General", icon: Settings2 }, { label: "Security", icon: ShieldCheck }, { label: "Rulesets", icon: LockKeyhole }, { label: "Connectors", icon: Workflow }, { label: "Automation & limits", icon: Gauge }].map(({ label, icon: SettingIcon }) => <button key={label} title={label} className={"nav-item subnav " + (activeSettings === label ? "active" : "")} onClick={() => { setActiveSettings(label); setMobileContextOpen(false); }}><SettingIcon size={20} /><span>{label}</span></button>)}
         </> : <>
           <div className="side-section-head"><span>QUICK ACCESS</span></div>
           <button className="quick-link" onClick={() => changePage("Jobs & approvals")}><Inbox size={15} /><span>Needs your review</span><span className="nav-count">{jobs.filter((j) => j.status === "Submitted").length}</span></button>
@@ -688,8 +799,8 @@ export default function App() {
               {jobs.length === 0 && <div className="empty-state">No jobs yet. Assign your first task to get started.</div>}
               <button className="panel-footer-link" onClick={() => setShowJobForm(true)}><Plus size={15} /> Create a new job</button>
             </section>
-            <section className="panel team-panel"><div className="panel-heading"><div><h2>Your team</h2><p>A quick look at your employees.</p></div><button className="text-button" onClick={() => changePage("Employees")}>All employees <ArrowUpRight size={14} /></button></div>
-              <div className="team-list">{employees.slice(0, 5).map((e) => <button className="team-person" key={e.id} onClick={() => { setSelectedEmployee(e.id); setPage("Employees"); }}><span className="avatar">{initials(e.name)}</span><span className="team-person-copy"><strong>{e.name}</strong><small>{e.role}</small></span><span className={"presence " + e.status.toLowerCase().replace(" ", "-")}><i />{e.status}</span></button>)}</div>
+            <section className="panel team-panel"><div className="panel-heading"><div><h2>Your team</h2><p>A quick look at your employees.</p></div><button className="text-button" onClick={() => changePage("Management")}>View team <ArrowUpRight size={14} /></button></div>
+              <div className="team-list">{employees.slice(0, 5).map((e) => <button className="team-person" key={e.id} onClick={() => { setSelectedEmployee(e.id); setPage("Management"); }}><span className="avatar">{initials(e.name)}</span><span className="team-person-copy"><strong>{e.name}</strong><small>{e.role}</small></span><span className={"presence " + e.status.toLowerCase().replace(" ", "-")}><i />{e.status}</span></button>)}</div>
             </section>
             <section className="panel goals-panel"><div className="panel-heading"><div><h2>Goals & progress</h2><p>Live goals saved to this workspace.</p></div><button className="icon-button subtle" onClick={() => setShowGoalForm(true)} title="Add goal"><Plus size={17} /></button></div>{goals.map((goal) => <div className="goal-item" key={goal.id}><div className="goal-top"><span className="goal-mark purple-mark"><ArrowUpRight size={14} /></span><div><strong>{goal.title}</strong><small>{goal.dueDate ? "Due " + goal.dueDate : goal.status}</small></div><b>{Math.round(goal.progress)}%</b></div><div className="goal-progress"><span style={{ width: goal.progress + "%" }} /></div><input className="goal-progress-input" type="range" min="0" max="100" step="5" value={goal.progress} aria-label={"Progress for " + goal.title} onChange={(e) => { const progress = Number(e.target.value); setGoals((old) => old.map((g) => g.id === goal.id ? { ...g, progress, status: progress === 100 ? "completed" : "active" } : g)); }} /></div>)}{goals.length === 0 && <div className="empty-state"><strong>No goals yet</strong><p>Add a measurable goal to track progress here.</p></div>}<button className="panel-footer-link" onClick={() => setShowGoalForm(true)}><Plus size={15} /> Add a goal</button></section>
             <section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Recent job updates from this workspace.</p></div><Clock3 size={16} className="muted-icon" /></div><div className="activity-list">{jobs.slice(0, 4).map((job) => <div className="activity-item" key={job.id}><span className="activity-bullet violet-bullet">{job.status === "Approved" ? <CheckCheck size={13} /> : <Inbox size={13} />}</span><div><p><strong>{job.title}</strong> · {job.status.toLowerCase()}</p><small>{new Date(job.created).toLocaleString()}</small></div></div>)}{jobs.length === 0 && <div className="empty-state">Job activity will appear here when you assign work.</div>}</div></section>
@@ -697,8 +808,8 @@ export default function App() {
         </div>}
         {page === "Management" && <div className="page-wrap management-page">
           <div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> People</div><h1>Management</h1><p>Your organisation, departments and AI employees.</p></div><button className="primary-button" onClick={() => setShowEmployeeForm(true)}><Plus size={16} /> Add employee</button></div>
-          <div className="management-layout"><section className="panel management-tree"><div className="management-tree-head"><div><h2>Organisation</h2><p>{employees.length} employees · {depts.length} departments</p></div><button className="secondary-button compact-button" onClick={() => setShowEmployeeForm(true)}><Plus size={14} /> Add employee</button></div><div className="org-tree">{departmentTree()}</div>{filteredEmployees.length === 0 && <div className="empty-state">No employees match your search.</div>}</section>
-          {activeEmployee && <section className="panel employee-detail"><div className="employee-profile-head"><div className="avatar large">{initials(activeEmployee.name)}</div><div className="employee-profile-title"><h2>{activeEmployee.name}</h2><p>{activeEmployee.role}</p><span className={"presence " + activeEmployee.status.toLowerCase().replace(" ", "-")}><i />{activeEmployee.status}</span></div><button className="icon-button subtle" onClick={() => notify("More employee actions coming soon")}><MoreHorizontal size={18} /></button></div>
+          <div className="management-layout"><section className="panel management-tree"><div className="management-tree-head"><div><h2>Organisation</h2><p>{employees.length} employees · {depts.length} departments</p></div></div><div className="org-tree">{departmentTree()}</div>{filteredEmployees.length === 0 && <div className="empty-state">No employees match your search.</div>}</section>
+          {activeEmployee && <section className="panel employee-detail"><div className="employee-profile-head"><div className="avatar large">{initials(activeEmployee.name)}</div><div className="employee-profile-title"><h2>{activeEmployee.name}</h2><p>{activeEmployee.role}</p><span className={"presence " + activeEmployee.status.toLowerCase().replace(" ", "-")}><i />{activeEmployee.status}</span></div><button className="icon-button subtle" title={activeEmployee.status === "Paused" ? "Resume employee" : "Pause employee"} aria-label={activeEmployee.status === "Paused" ? "Resume employee" : "Pause employee"} onClick={() => { const resume = activeEmployee.status === "Paused"; setEmployees((old) => old.map((employee) => employee.id === activeEmployee.id ? { ...employee, status: resume ? (employee.task ? "Working" : "Available") : "Paused" } : employee)); notify(resume ? activeEmployee.name + " resumed" : activeEmployee.name + " paused"); }}><MoreHorizontal size={18} /></button></div>
             <button className="primary-button full-button" onClick={() => openChatWith(activeEmployee.id)}><MessageCircle size={16} /> Open conversation</button>
             
             <div className="detail-divider" /><div className="detail-section-title">CURRENT STATUS</div><div className="status-summary"><span className={"status-pulse " + activeEmployee.status.toLowerCase().replace(" ", "-")} /><div><strong>{activeEmployee.status}</strong><small>{activeEmployee.task ? "Currently focused on " + activeEmployee.task : "No active task assigned"}</small></div></div>
@@ -709,7 +820,7 @@ export default function App() {
             <label className="field-label">Communication tone<select value={activeEmployee.tone} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, tone: e.target.value } : x))}><option>Clear & concise</option><option>Thoughtful & creative</option><option>Warm & articulate</option><option>Analytical</option><option>Practical & direct</option><option>Curious & collaborative</option><option>Formal</option><option>Friendly</option></select></label>
             <label className="field-label">AI model<select value={freeModels.some((item) => item.id === activeEmployee.model) ? activeEmployee.model : freeModels[0]?.id ?? fallbackFreeModels[0].id} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, model: e.target.value } : x))}>{freeModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select><small className="input-help">{modelsLoading ? "Loading current free model catalogue…" : "Only models with zero prompt and completion pricing are listed."}</small></label>
             <label className="field-label">Custom instructions<textarea rows={4} value={activeEmployee.instructions} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, instructions: e.target.value } : x))} placeholder="How should this employee work?" /></label>
-            <div className="detail-note"><ShieldCheck size={15} /><span>Changes are saved to your cloud workspace.</span></div>
+            <div className="detail-note"><ShieldCheck size={15} /><span>{demoMode ? "Changes are temporary and stay in this session." : "Changes are saved to your cloud workspace."}</span></div>
           </section>}
           </div>
         </div>}
@@ -721,22 +832,22 @@ export default function App() {
               {busy && <div className="typing-indicator"><span /><span /><span /> {activeConversation?.name} is thinking…</div>}
               {!activeConversation?.messages.length && <div className="chat-empty"><span className="chat-empty-icon"><MessageCircle size={22} /></span><strong>Start the conversation</strong><p>Send a message. Employees decide whether to reply or open and complete assignments themselves.</p></div>}
             </div>
-            <div className="chat-composer-area"><div className="composer-tools"><span>Messages are saved to your cloud workspace</span></div><form className="chat-composer" onSubmit={sendMessage}><textarea value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement)?.requestSubmit(); } }} placeholder={"Message " + (activeConversation?.name ?? "your team") + "…"} rows={2} /><button className="send-button" type="submit" disabled={!message.trim() || busy} aria-label="Send message"><Send size={17} /></button></form><small className="composer-hint">Enter to send · Shift + Enter for a new line</small></div>
+            <div className="chat-composer-area"><div className="composer-tools"><span>{demoMode ? "Demo messages stay in this session" : "Messages are saved to your cloud workspace"}</span></div><form className="chat-composer" onSubmit={sendMessage}><textarea value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement)?.requestSubmit(); } }} placeholder={"Message " + (activeConversation?.name ?? "your team") + "…"} rows={2} /><button className="send-button" type="submit" disabled={!message.trim() || busy} aria-label="Send message"><Send size={17} /></button></form><small className="composer-hint">Enter to send · Shift + Enter for a new line</small></div>
           </div>
         </div>}
         {page === "Jobs & approvals" && <div className="page-wrap"><div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> Operations</div><h1>Jobs & approvals</h1><p>Track delegated work and review submitted results.</p></div></div><div className="job-filters"><span>{jobs.length} total jobs</span><span className="filter-pill">{jobs.filter((j) => j.status === "Queued").length} queued</span><span className="filter-pill review">{jobs.filter((j) => j.status === "Submitted").length} awaiting review</span><span className="filter-pill">{jobs.filter((j) => j.status === "Rejected").length} revisions</span></div><div className="job-toolbar"><label className="job-search"><Search size={15} /><input value={jobSearch} onChange={(e) => setJobSearch(e.target.value)} placeholder="Search jobs, details, employees…" /></label><select value={jobStatusFilter} onChange={(e) => setJobStatusFilter(e.target.value)} aria-label="Filter jobs by status">{["All statuses", "Queued", "In progress", "Submitted", "Rejected", "Approved"].map((status) => <option key={status}>{status}</option>)}</select></div><div className="panel all-jobs">{filteredJobs.map((j) => { const emp = employeeMap.get(j.employeeId); return <div className="all-job-row" key={j.id}><span className="avatar">{initials(emp?.name ?? "AI")}</span><div className="all-job-copy"><strong>{j.title}</strong><small>Assigned to {emp?.name ?? "Unassigned"} · {new Date(j.created).toLocaleString()} · {j.priority}{j.description ? " · " + j.description : ""}</small></div><span className={"job-status " + j.status.toLowerCase().replace(" ", "-")}>{j.status}</span>{j.status === "Queued" && <button className="secondary-button compact-button" onClick={() => startJob(j.id)}>Start job</button>}{(j.status === "In progress" || j.status === "Rejected") && <button className="secondary-button compact-button" disabled={busy} onClick={() => { if (j.status === "Rejected") setJobs((old) => old.map((x) => x.id === j.id ? { ...x, status: "In progress" } : x)); void runJob(j.id); }}>{busy ? "Working…" : j.status === "Rejected" ? "Revise & regenerate" : "Generate work"}</button>}{j.status === "Submitted" && <button className="secondary-button compact-button" onClick={() => { setReviewNote(j.reviewNote ?? ""); setSelectedJobId(j.id); }}>Review work</button>}{j.status === "Rejected" && <button className="secondary-button compact-button" onClick={() => { setReviewNote(j.reviewNote ?? ""); setSelectedJobId(j.id); }}>View feedback</button>}{j.status === "Approved" && <span className="approved-check"><CheckCheck size={16} /> Complete</span>}{j.status === "Queued" && <button className="icon-button subtle" title="Delete job" aria-label={"Delete " + j.title} onClick={() => deleteJob(j.id)}>×</button>}</div>; })}{filteredJobs.length === 0 && <div className="empty-state">No jobs match these filters.</div>}</div></div>}
-        {page === "Settings" && <div className="page-wrap settings-page"><div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> Configuration</div><h1>Settings</h1><p>Configure how your AI team works and what it can access.</p></div><span className="saved-badge"><Check size={13} /> Saved automatically</span></div><div className="settings-layout"><div className="settings-tabs">{["General", "Security", "Rulesets", "Connectors", "Automation & limits"].map((item) => <button className={activeSettings === item ? "active" : ""} key={item} onClick={() => setActiveSettings(item)}>{item}</button>)}</div><section className="panel settings-content">
-          {activeSettings === "General" && <><h2>General preferences</h2><p className="settings-intro">Manage the basics for {company.name}.</p><label className="field-label">Company name<input value={company.name} onChange={(e) => { const updated = { ...company, name: e.target.value }; setCompany(updated); setCompanies((old) => old.map((item) => item.id === updated.id ? updated : item)); }} /></label>{(memberRole === "owner" || memberRole === "admin") && <div className="settings-info-row"><div><strong>Team access</strong><small>Invite a teammate by email. The link is limited to that email and expires in seven days.</small></div><button className="secondary-button compact-button" onClick={() => { setInviteUrl(""); setInviteEmail(""); setShowInviteForm(true); }}>Invite member</button></div>}<div className="settings-info-row"><div><strong>Workspace appearance</strong><small>Clean, light interface optimised for daily work.</small></div><span className="setting-pill">Light</span></div><div className="settings-info-row"><div><strong>Data storage</strong><small>Workspace data is stored in Supabase and shared with authorised company members.</small></div><span className="setting-pill green-pill">Cloud</span></div></>}
-          {activeSettings === "Security" && <><h2>Security & permissions</h2><p className="settings-intro">Keep sensitive work under control.</p><div className="setting-toggle-row"><div><strong>Require approval before jobs run</strong><small>New assignments wait for a human to approve before they begin.</small></div><button className={"toggle " + (settings.approvalRequired ? "on" : "")} onClick={() => setSettings({ ...settings, approvalRequired: !settings.approvalRequired, autoRun: settings.approvalRequired ? false : settings.autoRun })}><span /></button></div><div className="settings-info-row"><div><strong>External actions</strong><small>External publishing and connector writes should require explicit approval.</small></div><span className="setting-pill">Approval gated</span></div><div className="settings-info-row"><div><strong>Credentials</strong><small>Never store provider secrets in frontend code. Use server-side secrets for production.</small></div><span className="setting-pill">Protected</span></div></>}
-          {activeSettings === "Rulesets" && <><h2>Rulesets</h2><p className="settings-intro">Company-wide guardrails applied to every employee.</p><div className="rule-card"><span className="rule-icon"><ShieldCheck size={17} /></span><div><strong>Human approval for consequential actions</strong><small>Publishing, sending messages externally, spending and deleting data require confirmation.</small></div><span className="setting-pill green-pill">Enabled</span></div><div className="rule-card"><span className="rule-icon"><LockKeyhole size={17} /></span><div><strong>Keep company data private</strong><small>Employees should only use the context required for their assigned work.</small></div><span className="setting-pill green-pill">Enabled</span></div><div className="rule-card"><span className="rule-icon"><CheckCheck size={17} /></span><div><strong>Require evidence in submissions</strong><small>Ask employees to include the result, relevant links and unresolved issues.</small></div><span className="setting-pill green-pill">Enabled</span></div><button className="secondary-button" onClick={() => notify("Ruleset editor is planned for the next iteration")}><Plus size={14} /> Add custom ruleset</button></>}
+        {page === "Settings" && <div className="page-wrap settings-page"><div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> Configuration</div><h1>Settings</h1><p>Configure how your AI team works and what it can access.</p></div><span className="saved-badge"><Check size={13} /> {demoMode ? "Session only" : "Saved automatically"}</span></div><div className="settings-layout"><section className="panel settings-content">
+          {activeSettings === "General" && <><h2>General preferences</h2><p className="settings-intro">Manage the basics for {company.name}.</p><label className="field-label">Company name<input value={company.name} onChange={(e) => { const updated = { ...company, name: e.target.value }; setCompany(updated); setCompanies((old) => old.map((item) => item.id === updated.id ? updated : item)); }} /></label>{!demoMode && (memberRole === "owner" || memberRole === "admin") && <div className="settings-info-row"><div><strong>Team access</strong><small>Invite a teammate by email. The link is limited to that email and expires in seven days.</small></div><button className="secondary-button compact-button" onClick={() => { setInviteUrl(""); setInviteEmail(""); setShowInviteForm(true); }}>Invite member</button></div>}<div className="settings-info-row"><div><strong>Data storage</strong><small>{demoMode ? "Changes remain in this session and are discarded when you exit." : "Workspace data is stored in Supabase and shared with authorised company members."}</small></div><span className={"setting-pill " + (demoMode ? "" : "green-pill")}>{demoMode ? "Session only" : "Cloud"}</span></div></>}
+          {activeSettings === "Security" && <><h2>Security & permissions</h2><p className="settings-intro">Keep sensitive work under control.</p><div className="settings-info-row"><div><strong>Job approval policy</strong><small>{settings.approvalRequired ? "New assignments wait for approval before starting." : "New assignments can start without the approval gate; generation still requires a manual action."}</small></div><button className="secondary-button compact-button" onClick={() => setActiveSettings("Automation & limits")}>Change policy</button></div><div className="settings-info-row"><div><strong>External actions</strong><small>External publishing and connector writes should require explicit approval.</small></div><span className="setting-pill">Approval gated</span></div><div className="settings-info-row"><div><strong>Credentials</strong><small>Provider secrets must never be placed in frontend code. Use a server-side proxy for shared/public deployments.</small></div><span className="setting-pill">Protected</span></div></>}
+          {activeSettings === "Rulesets" && <><h2>Rulesets</h2><p className="settings-intro">Company-wide guardrails applied to every employee.</p><div className="rule-card"><span className="rule-icon"><ShieldCheck size={17} /></span><div><strong>Human approval for consequential actions</strong><small>Publishing, sending messages externally, spending and deleting data require confirmation.</small></div><span className="setting-pill green-pill">Enabled</span></div><div className="rule-card"><span className="rule-icon"><LockKeyhole size={17} /></span><div><strong>Keep company data private</strong><small>Employees should only use the context required for their assigned work.</small></div><span className="setting-pill green-pill">Enabled</span></div><div className="rule-card"><span className="rule-icon"><CheckCheck size={17} /></span><div><strong>Require evidence in submissions</strong><small>Ask employees to include the result, relevant links and unresolved issues.</small></div><span className="setting-pill green-pill">Enabled</span></div></>}
           {activeSettings === "Connectors" && <>
             <h2>AI provider & connectors</h2>
             <p className="settings-intro">Only models with zero prompt and completion prices are offered.</p>
-            <div className="openrouter-key-card">
+            {demoMode ? <div className="demo-connector-notice"><Sparkles size={16} /><div><strong>Provider connections are simulated in demo mode</strong><p>No API key is read, saved, or used for demo replies and sample deliverables. Sign in to configure an AI provider for real work.</p></div></div> : <><div className="openrouter-key-card">
               <label className="field-label">OpenRouter API key
-                <input type="password" autoComplete="off" value={openRouterKey} onChange={(e) => { setOpenRouterKey(e.target.value); window.localStorage.setItem(openRouterKeyName, e.target.value); }} placeholder="sk-or-v1-…" />
+                <input type="password" autoComplete="off" value={openRouterKey} onChange={(e) => { setOpenRouterKey(e.target.value); window.localStorage.setItem(openRouterKeyName, e.target.value); }} placeholder="Paste an OpenRouter API key" />
               </label>
-              <p className="small-disclaimer">The key is stored in this browser only. This static GitHub Pages app sends requests directly from the browser, so the key can be inspected on this device. A server-side proxy is safer for shared/public use.</p>
+              <p className="small-disclaimer">This static app sends requests directly from the browser. A key stored here can be inspected on this device; a server-side proxy is safer for shared/public use.</p>
               <div className="settings-info-row">
                 <div><strong>OpenRouter</strong><small>{openRouterKey.trim() ? "API key saved in this browser." : "Add your key to enable AI replies and employee deliverables."}</small></div>
                 <button className={"connector-action " + (settings.connectors.includes("OpenRouter") ? "enabled" : "")} onClick={() => setSettings((old) => ({ ...old, connectors: old.connectors.includes("OpenRouter") ? old.connectors.filter((x) => x !== "OpenRouter") : [...old.connectors, "OpenRouter"] }))}>{settings.connectors.includes("OpenRouter") ? "Enabled" : "Enable"}</button>
@@ -745,14 +856,16 @@ export default function App() {
                 <div><strong>Free model catalogue</strong><small>{modelsLoading ? "Refreshing model list…" : freeModels.length + " zero-priced models listed."}</small></div>
                 <button className="secondary-button compact-button" onClick={() => { setModelsLoading(true); fetch("https://openrouter.ai/api/v1/models?filter=free").then((response) => response.json()).then((payload: { data?: Array<{ id?: string; name?: string; pricing?: { prompt?: string; completion?: string } }> }) => { const models = (payload.data ?? []).filter((model) => model.id && model.id.endsWith(":free") && Number(model.pricing?.prompt ?? 1) === 0 && Number(model.pricing?.completion ?? 1) === 0).map((model) => ({ id: model.id!, name: (model.name || model.id!) + " (free)" })).sort((a, b) => a.name.localeCompare(b.name)); if (models.length) setFreeModels(models); }).catch(() => notify("Could not refresh free models; keeping the last loaded list.")).finally(() => setModelsLoading(false)); }}>Refresh models</button>
               </div>
-            </div>
-            <div className="connector-row"><span className="connector-icon"><Zap size={17} /></span><div><strong>Supabase</strong><small>Database and authentication for this workspace.</small></div><button className="connector-action enabled" disabled><Check size={13} /> Connected</button></div>
-          </>}{activeSettings === "Automation & limits" && <><h2>Automation & usage limits</h2><p className="settings-intro">Choose how much work can run without interrupting you.</p><div className="setting-toggle-row"><div><strong>Allow jobs to start without approval</strong><small>New jobs can move straight to In progress. You still explicitly generate the deliverable; no background worker runs automatically.</small></div><button className={"toggle " + (settings.autoRun ? "on" : "")} onClick={() => setSettings({ ...settings, autoRun: !settings.autoRun, approvalRequired: settings.autoRun })}><span /></button></div><label className="field-label">Daily job creation limit<input type="number" min="1" max="10000" value={settings.dailyLimit} onChange={(e) => setSettings({ ...settings, dailyLimit: Math.max(1, Number(e.target.value)) })} /></label><label className="field-label">Monthly job creation limit<input type="number" min="1" max="100000" value={settings.monthlyLimit} onChange={(e) => setSettings({ ...settings, monthlyLimit: Math.max(1, Number(e.target.value)) })} /></label><div className="usage-summary"><div className="usage-summary-top"><span>Deliverables with results</span><strong>{jobs.filter((j) => Boolean(j.result?.trim())).length} / {jobs.length}</strong></div><div className="usage-track"><span style={{ width: (jobs.length ? jobs.filter((j) => Boolean(j.result?.trim())).length / jobs.length * 100 : 0) + "%" }} /></div></div><p className="small-disclaimer">Provider token usage and billing are not exposed by the current browser AI integration. These figures count saved deliverables, not billable tokens.</p></>}
+            </div></>}
+            <div className="connector-row"><span className="connector-icon"><Zap size={17} /></span><div><strong>Supabase</strong><small>{demoMode ? "Cloud storage is bypassed in this session." : "Database and authentication for this workspace."}</small></div>{demoMode ? <span className="setting-pill">Demo only</span> : <button className="connector-action enabled" disabled><Check size={13} /> Connected</button>}</div>
+          </>}{activeSettings === "Automation & limits" && <><h2>Automation & usage limits</h2><p className="settings-intro">Control the approval gate and how many assignments can be created.</p><div className="setting-toggle-row"><div><strong>Require approval before jobs start</strong><small>{settings.approvalRequired ? "New assignments wait in the queue until you start them." : "New assignments can start immediately, but AI generation still requires an explicit action. No background worker runs."}</small></div><button className={"toggle " + (settings.approvalRequired ? "on" : "")} role="switch" aria-checked={settings.approvalRequired} aria-label="Require approval before jobs start" onClick={() => setSettings((old) => { const approvalRequired = !old.approvalRequired; return { ...old, approvalRequired, autoRun: !approvalRequired }; })}><span /></button></div><label className="field-label">Daily job creation limit<input type="number" min="1" max="10000" value={settings.dailyLimit} onChange={(e) => setSettings({ ...settings, dailyLimit: Math.max(1, Number(e.target.value)) })} /></label><label className="field-label">Monthly job creation limit<input type="number" min="1" max="100000" value={settings.monthlyLimit} onChange={(e) => setSettings({ ...settings, monthlyLimit: Math.max(1, Number(e.target.value)) })} /></label><div className="usage-summary"><div className="usage-summary-top"><span>Deliverables with results</span><strong>{jobs.filter((j) => Boolean(j.result?.trim())).length} / {jobs.length}</strong></div><div className="usage-track"><span style={{ width: (jobs.length ? jobs.filter((j) => Boolean(j.result?.trim())).length / jobs.length * 100 : 0) + "%" }} /></div></div><p className="small-disclaimer">Provider token usage and billing are not exposed by the current browser AI integration. These figures count saved deliverables, not billable tokens.</p></>}
         </section></div></div>}
       </main>
     </div>
+    {mobileContextOpen && <button type="button" className="sidebar-scrim" aria-label="Close contextual navigation" onClick={() => setMobileContextOpen(false)} />}
     {toast && <div className="toast"><Check size={15} />{toast}</div>}
-    {profileEmployeeId && (() => { const person = employeeMap.get(profileEmployeeId); if (!person) return null; return <div className="modal-backdrop" onClick={() => setProfileEmployeeId(null)}><section className="modal employee-quick-profile" role="dialog" aria-modal="true" aria-labelledby="quick-profile-title" onClick={(e) => e.stopPropagation()}><button type="button" className="modal-close" onClick={() => setProfileEmployeeId(null)} aria-label="Close employee profile">×</button><div className="employee-profile-head"><div className="avatar large">{initials(person.name)}</div><div className="employee-profile-title"><h2 id="quick-profile-title">{person.name}</h2><p>{person.role}</p><span className={"presence " + person.status.toLowerCase().replace(" ", "-")}><i />{person.status}</span></div></div><div className="detail-divider" /><div className="detail-section-title">DEPARTMENT</div><p className="profile-value">{depts.find((d) => d.id === person.deptId)?.name ?? "Unassigned"}</p><div className="detail-section-title">CURRENT WORK</div><p className="profile-value">{person.task || "No active task"}</p><div className="detail-section-title">OPEN JOBS</div>{jobs.filter((j) => j.employeeId === person.id && ["Queued", "In progress", "Submitted"].includes(j.status)).map((j) => <div className="employee-job-mini" key={j.id}><span className="employee-job-copy"><strong>{j.title}</strong><small>{j.status}</small></span></div>)}{!jobs.some((j) => j.employeeId === person.id && ["Queued", "In progress", "Submitted"].includes(j.status)) && <p className="profile-value">No open jobs.</p>}<div className="work-modal-actions"><button className="secondary-button" onClick={() => setProfileEmployeeId(null)}>Close</button><button className="primary-button" onClick={() => { setProfileEmployeeId(null); setSelectedEmployee(person.id); setPage("Management"); }}><Users size={14} /> Open full profile</button><button className="secondary-button" onClick={() => { setProfileEmployeeId(null); setPage("Communication"); void openChatWith(person.id); }}>Open chat</button></div></section></div>; })()}
+    {showHelp && <div className="modal-backdrop" onClick={() => setShowHelp(false)}><section className="modal help-modal" role="dialog" aria-modal="true" aria-labelledby="help-modal-title" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setShowHelp(false)} aria-label="Close help">×</button><span className="modal-kicker"><CircleHelp size={14} /> QUICK GUIDE</span><h2 id="help-modal-title">How AutoBusiness works</h2><div className="help-step"><strong>1. Talk to your team</strong><p>Private and group conversations share relevant workspace chat and assignment context with participating employees.</p></div><div className="help-step"><strong>2. Delegate meaningful work</strong><p>Employees can choose to reply or open an assignment. New assignments appear in Jobs & approvals.</p></div><div className="help-step"><strong>3. Review before approving</strong><p>Open submitted work, request a revision with feedback, or approve it to complete the job.</p></div><div className="help-step"><strong>4. Configure access carefully</strong><p>Provider keys are browser-local in this static deployment. External publishing, connector writes and background automation are not enabled by this demo.</p></div><div className="work-modal-actions"><button className="primary-button" onClick={() => setShowHelp(false)}>Got it</button><button className="secondary-button" onClick={() => { setShowHelp(false); changePage("Settings"); }}>Open settings</button></div></section></div>}
+    {profileEmployeeId && (() => { const person = employeeMap.get(profileEmployeeId); if (!person) return null; return <div className="modal-backdrop" onClick={() => setProfileEmployeeId(null)}><section className="modal employee-quick-profile" role="dialog" aria-modal="true" aria-labelledby="quick-profile-title" onClick={(e) => e.stopPropagation()}><button type="button" className="modal-close" onClick={() => setProfileEmployeeId(null)} aria-label="Close employee profile">×</button><div className="employee-profile-head"><div className="avatar large">{initials(person.name)}</div><div className="employee-profile-title"><h2 id="quick-profile-title">{person.name}</h2><p>{person.role}</p><span className={"presence " + person.status.toLowerCase().replace(" ", "-")}><i />{person.status}</span></div></div><div className="detail-divider" /><div className="detail-section-title">DEPARTMENT</div><p className="profile-value">{depts.find((d) => d.id === person.deptId)?.name ?? "Unassigned"}</p><div className="detail-section-title">CURRENT WORK</div><p className="profile-value">{person.task || "No active task"}</p><div className="detail-section-title">OPEN JOBS</div>{jobs.filter((j) => j.employeeId === person.id && ["Queued", "In progress", "Submitted"].includes(j.status)).map((j) => <div className="employee-job-mini" key={j.id}><span className="employee-job-copy"><strong>{j.title}</strong><small>{j.status}</small></span></div>)}{!jobs.some((j) => j.employeeId === person.id && ["Queued", "In progress", "Submitted"].includes(j.status)) && <p className="profile-value">No open jobs.</p>}<div className="work-modal-actions"><button className="secondary-button" onClick={() => setProfileEmployeeId(null)}>Close</button><button className="primary-button" onClick={() => { setProfileEmployeeId(null); setSelectedEmployee(person.id); setPage("Management"); }}><Users size={14} /> Open full profile</button><button className="secondary-button" onClick={() => { setProfileEmployeeId(null); setPage("Communication"); setMobileContextOpen(false); void openChatWith(person.id); }}>Open chat</button></div></section></div>; })()}
     {selectedJobId && (() => { const j = jobs.find((item) => item.id === selectedJobId); if (!j) return null; const emp = employeeMap.get(j.employeeId); return <div className="modal-backdrop" onClick={() => setSelectedJobId(null)}><section className="modal work-modal" role="dialog" aria-modal="true" aria-labelledby="work-modal-title" onClick={(e) => e.stopPropagation()}><button type="button" className="modal-close" onClick={() => setSelectedJobId(null)} aria-label="Close work review">×</button><span className="modal-kicker"><Inbox size={14} /> DELIVERABLE REVIEW</span><h2 id="work-modal-title">{j.title}</h2><p>Assigned to {emp?.name ?? "Unassigned"} · {j.status} · {j.priority}{j.submittedAt ? " · Submitted " + new Date(j.submittedAt).toLocaleString() : ""}</p>{j.description && <div className="work-job-brief"><strong>Job brief</strong><p>{j.description}</p></div>}{j.status === "Rejected" && j.reviewNote && <div className="review-feedback"><strong>Requested changes</strong><p>{j.reviewNote}</p></div>}<div className="work-result">{j.result?.trim() || "No deliverable has been generated yet. Start the job and generate work before reviewing or approving it."}</div>{j.status === "Submitted" && <label className="review-note-field">Revision feedback (required to send back)<textarea rows={3} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Explain what needs to change, with specific, actionable feedback." /></label>}{j.status === "Rejected" && <label className="review-note-field">Update revision feedback<textarea rows={3} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="What should the employee change?" /></label>}<div className="work-modal-actions"><button className="secondary-button" onClick={() => setSelectedJobId(null)}>Close</button>{j.status === "In progress" && <button className="primary-button" disabled={busy} onClick={() => void runJob(j.id)}>{busy ? "Generating…" : "Generate work"}</button>}{j.status === "Rejected" && <button className="primary-button" disabled={busy} onClick={() => { setJobs((old) => old.map((x) => x.id === j.id ? { ...x, status: "In progress", reviewNote: reviewNote.trim() || x.reviewNote } : x)); void runJob(j.id, reviewNote.trim() || j.reviewNote); }}>{busy ? "Generating…" : "Regenerate work"}</button>}{j.status === "Submitted" && <><button className="secondary-button" onClick={() => requestRevision(j.id)}>Request revision</button><button className="primary-button" disabled={!j.result?.trim()} onClick={() => { if (j.result?.trim()) { approveJob(j.id); setSelectedJobId(null); } }}><Check size={14} /> Approve reviewed work</button></>}</div></section></div>; })()}\n    {showJobForm && <div className="modal-backdrop" onClick={() => setShowJobForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createJob}><button type="button" className="modal-close" onClick={() => setShowJobForm(false)}>×</button><span className="modal-kicker"><Inbox size={14} /> JOB ASSIGNMENT</span><h2>Assign a job</h2><p>Give an employee a clear outcome to work towards.</p><label>Job title<input autoFocus value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} placeholder="e.g. Draft a launch plan" minLength={2} maxLength={240} required /></label><label>Job brief / acceptance criteria<textarea rows={4} value={jobDescription} onChange={(e) => setJobDescription(e.target.value)} maxLength={8000} placeholder="Describe the expected deliverable, audience, constraints, and what a successful result includes." /></label><label>Priority<select value={jobPriority} onChange={(e) => setJobPriority(e.target.value as "Normal" | "Urgent")}><option>Normal</option><option>Urgent</option></select></label><label>Assign to<select value={jobEmployee} onChange={(e) => setJobEmployee(e.target.value)}>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}</select></label><div className="modal-note"><ShieldCheck size={15} />{settings.approvalRequired ? "This job will be queued for approval before it can start." : "This job will start without the approval gate; AI generation still requires a manual action."}</div><button className="primary-button modal-submit" type="submit">Create job <ArrowUpRight size={15} /></button></form></div>}
     {showEmployeeForm && <div className="modal-backdrop" onClick={() => setShowEmployeeForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createEmployee}><button type="button" className="modal-close" onClick={() => setShowEmployeeForm(false)}>×</button><span className="modal-kicker"><Users size={14} /> TEAM SETUP</span><h2>Add an employee</h2><p>Create a new AI teammate for this workspace.</p><label>Full name<input autoFocus value={employeeName} onChange={(e) => setEmployeeName(e.target.value)} placeholder="e.g. Sam Taylor" required /></label><label>Role<input value={employeeRole} onChange={(e) => setEmployeeRole(e.target.value)} placeholder="e.g. Research analyst" required /></label><label>Department<select value={newEmployeeDept} onChange={(e) => setNewEmployeeDept(e.target.value)}>{depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label><button className="primary-button modal-submit" type="submit">Create employee <Plus size={15} /></button></form></div>}
     {showInviteForm && <div className="modal-backdrop" onClick={() => setShowInviteForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createInvite}><button type="button" className="modal-close" onClick={() => setShowInviteForm(false)} aria-label="Close invitation form">×</button><span className="modal-kicker"><Users size={14} /> TEAM ACCESS</span><h2>Invite a teammate</h2><p>Only the invited email address can redeem this link. It expires after seven days.</p><label>Email address<input autoFocus type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="teammate@company.com" required disabled={Boolean(inviteUrl)} /></label><label>Workspace role<select value={inviteRole} onChange={(e) => setInviteRole(e.target.value as "admin" | "member")} disabled={Boolean(inviteUrl)}><option value="member">Member — collaborate on work</option><option value="admin">Admin — manage workspace settings</option></select></label>{inviteUrl && <div className="invite-link-result"><strong>Invitation link ready</strong><p>Send this link to the invited person. They must sign in with the exact email address above.</p><input aria-label="Invitation link" readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} /><button type="button" className="secondary-button" onClick={() => { void navigator.clipboard.writeText(inviteUrl).then(() => notify("Invitation link copied")).catch(() => notify("Select the invitation link and copy it manually")); }}>Copy invitation link</button><button type="button" className="text-button" onClick={() => { setInviteUrl(""); setInviteEmail(""); }}>Create another invitation</button></div>}<div className="work-modal-actions"><button type="button" className="secondary-button" onClick={() => setShowInviteForm(false)}>Close</button>{!inviteUrl && <button className="primary-button" type="submit" disabled={inviteBusy}>{inviteBusy ? "Creating link…" : "Create invitation link"}</button>}</div></form></div>}
