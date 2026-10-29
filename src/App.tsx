@@ -26,6 +26,8 @@ function MarkdownPreview({ content }: { content: string }) {
     if (heading) { blocks.push({ type: "heading", text: heading[2], level: heading[1].length }); continue; }
     if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)) { blocks.push({ type: "rule", text: "" }); continue; }
     if (/^\s*>\s?/.test(line)) { blocks.push({ type: "quote", text: line.replace(/^\s*>\s?/, "") }); continue; }
+    const task = line.match(/^\s*[-*+]\s+\[([ xX])\]\s+(.+)$/);
+    if (task) { blocks.push({ type: "task", text: task[2], level: task[1].toLowerCase() === "x" ? 1 : 0 }); continue; }
     const bullet = line.match(/^\s*[-*+]\s+(.+)$/);
     if (bullet) { blocks.push({ type: "bullet", text: bullet[1] }); continue; }
     const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
@@ -44,6 +46,7 @@ function MarkdownPreview({ content }: { content: string }) {
   return <div className="markdown-preview">{blocks.map((block, index) => {
     if (block.type === "space") return <div className="markdown-space" key={index} />;
     if (block.type === "heading") { const level = Math.min(block.level ?? 2, 4); if (level === 1) return <h1 key={index}>{inline(block.text)}</h1>; if (level === 2) return <h2 key={index}>{inline(block.text)}</h2>; if (level === 3) return <h3 key={index}>{inline(block.text)}</h3>; return <h4 key={index}>{inline(block.text)}</h4>; }
+    if (block.type === "task") return <div className="markdown-list-item task" key={index}><input type="checkbox" checked={block.level === 1} readOnly aria-label={block.level === 1 ? "Completed item" : "Incomplete item"} /><div>{inline(block.text)}</div></div>;
     if (block.type === "bullet") return <div className="markdown-list-item bullet" key={index}><span>•</span><div>{inline(block.text)}</div></div>;
     if (block.type === "ordered") return <div className="markdown-list-item ordered" key={index}><span>{index + 1}.</span><div>{inline(block.text)}</div></div>;
     if (block.type === "code") return <pre key={index}><code>{block.text}</code></pre>;
