@@ -264,3 +264,61 @@
 .employee-quick-profile .profile-value { margin:5px 0 14px; color:#696b80; font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 @media(max-width:980px) { .management-layout { grid-template-columns:minmax(0,1fr); } .management-page .employee-detail { width:100%; } }
 @media(max-width:600px) { .management-tree { padding:14px 11px; } .management-tree-head { align-items:flex-start; } .management-tree-head .secondary-button { white-space:nowrap; } .chat-details-panel { right:8px; width:calc(100% - 16px); } }
+
+
+/* Demo, navigation and compact layout refinements */
+.auth-demo-actions{margin-top:18px;text-align:center}
+.demo-launch-button{width:100%;justify-content:center;min-height:42px;background:#f5f3ff;border-color:#e2ddff;color:#5d50c8}
+.auth-demo-actions p{margin:9px 0 0;color:#9293a4;font-size:10px;line-height:1.6}
+.demo-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#8a7bea;flex:0 0 7px}
+.demo-status{display:flex;align-items:center;gap:7px;color:#6558d9;font-size:11px;font-weight:600;white-space:nowrap}
+.demo-exit-button{border:1px solid #e5e1ff;background:#f7f6ff;color:#5e52c9;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:600;white-space:nowrap}
+.demo-exit-button:hover{background:#efedff}
+.demo-connector-notice{display:flex;gap:12px;align-items:flex-start;padding:15px;border:1px solid #e5e1ff;border-radius:11px;background:#f8f7ff;color:#6658cf;margin:16px 0}
+.demo-connector-notice>div{min-width:0}
+.demo-connector-notice strong{font-size:12px;color:#3f3b68}
+.demo-connector-notice p{margin:6px 0 0;font-size:11px;line-height:1.65;color:#797990}
+.help-modal{width:min(560px,calc(100vw - 28px))}
+.help-step{padding:13px 0;border-bottom:1px solid #f0f0f5}
+.help-step strong{font-size:12px;color:#38394e}
+.help-step p{font-size:11px;color:#85879a;line-height:1.7;margin:5px 0 0}
+.sidebar-scrim{display:none}
+.settings-layout{grid-template-columns:minmax(0,1fr)}
+.settings-content{width:100%;max-width:900px}
+.settings-content .field-label{max-width:560px}
+@media(min-width:761px){
+  .sidebar.primary-sidebar{width:62px;flex:0 0 62px;padding:18px 7px 12px;transition:width .18s ease,flex-basis .18s ease}
+  .sidebar.primary-sidebar:hover,.sidebar.primary-sidebar:focus-within{width:220px;flex-basis:220px}
+  .primary-sidebar .nav-item{min-width:0;min-height:43px;height:43px;padding:10px 12px;gap:12px;justify-content:flex-start}
+  .primary-sidebar .nav-item span{display:inline!important;opacity:0;width:0;flex:0 0 0;overflow:hidden}
+  .primary-sidebar:hover .nav-item span,.primary-sidebar:focus-within .nav-item span{opacity:1;width:auto;flex:1 1 auto}
+  .primary-sidebar .nav-item .nav-count{display:inline!important;margin-left:auto}
+  .primary-sidebar .workspace-label{display:block!important;opacity:0;height:0;overflow:hidden;margin:0;padding:0}
+  .primary-sidebar:hover .workspace-label,.primary-sidebar:focus-within .workspace-label{opacity:1;height:auto;margin-bottom:12px;padding:0 8px}
+  .sidebar.context-sidebar,.sidebar.context-sidebar:hover,.sidebar.context-sidebar:focus-within{width:250px;flex:0 0 250px;min-width:0;padding-left:11px;padding-right:11px}
+  .context-sidebar .context-sidebar-heading span,.context-sidebar .side-section-head span,.context-sidebar .chat-label,.context-sidebar .quick-link span:nth-child(2),.context-sidebar .quick-link .nav-count,.context-sidebar .employee-row-copy,.context-sidebar .muted-count,.context-sidebar .department-label,.context-sidebar .employee-search,.context-sidebar .side-card,.context-sidebar .usage-mini,.context-sidebar .sidebar-company>span:nth-child(2),.context-sidebar .sidebar-company>svg,.context-sidebar .side-new-button,.context-sidebar .nav-item.subnav span{display:revert!important}
+  .context-sidebar .chat-list-item,.context-sidebar .quick-link,.context-sidebar .employee-row,.context-sidebar .nav-item.subnav,.context-sidebar .side-new-button{justify-content:flex-start;min-width:0;max-width:100%}
+  .context-sidebar .nav-item.subnav{min-height:40px;height:auto}
+  .context-sidebar .sidebar-company{justify-content:flex-start}
+  .context-sidebar .sidebar-bottom{margin-top:auto}
+  .context-sidebar .side-card{display:block!important}
+  .main-panel{flex:1 1 0;min-width:0}
+  .page-wrap{max-width:1320px;padding:32px clamp(22px,3vw,40px) 46px}
+}
+@media(max-width:760px){
+  .topbar-right{gap:7px}
+  .demo-status{font-size:10px}
+  .demo-exit-button{padding:6px 8px}
+  .sidebar.primary-sidebar{width:64px!important;flex-basis:64px!important;min-width:64px;left:0}
+  .sidebar.context-sidebar,.sidebar.context-sidebar:hover,.sidebar.context-sidebar:focus-within{left:64px;width:min(265px,calc(100vw - 64px))!important;max-width:calc(100vw - 64px);flex-basis:min(265px,calc(100vw - 64px))!important;min-width:0;transform:translateX(-110%);visibility:hidden;transition:transform .18s ease,visibility .18s ease;z-index:54;box-shadow:10px 0 28px #1f1d3310}
+  .sidebar.context-sidebar.mobile-open{transform:translateX(0);visibility:visible}
+  .sidebar.context-sidebar .context-sidebar-heading span,.sidebar.context-sidebar .side-section-head span,.sidebar.context-sidebar .chat-label,.sidebar.context-sidebar .quick-link span:nth-child(2),.sidebar.context-sidebar .quick-link .nav-count,.sidebar.context-sidebar .employee-row-copy,.sidebar.context-sidebar .muted-count,.sidebar.context-sidebar .department-label,.sidebar.context-sidebar .employee-search,.sidebar.context-sidebar .side-card,.sidebar.context-sidebar .usage-mini,.sidebar.context-sidebar .sidebar-company>span:nth-child(2),.sidebar.context-sidebar .sidebar-company>svg,.sidebar.context-sidebar .side-new-button,.sidebar.context-sidebar .nav-item.subnav span{display:revert!important}
+  .sidebar.context-sidebar .chat-list-item,.sidebar.context-sidebar .quick-link,.sidebar.context-sidebar .employee-row,.sidebar.context-sidebar .nav-item.subnav,.sidebar.context-sidebar .side-new-button{justify-content:flex-start;min-height:42px}
+  .sidebar-scrim{display:block;position:fixed;inset:58px 0 0 64px;z-index:53;border:0;background:#20203335;padding:0}
+  .page-wrap{padding:22px 14px 34px}
+  .settings-content{padding:17px}
+  .settings-content .field-label{max-width:100%}
+  .auth-content{padding-top:34px}
+  .auth-card{padding:24px 20px}
+}
+@media(prefers-reduced-motion:reduce){.sidebar,.sidebar *{transition:none!important}}
