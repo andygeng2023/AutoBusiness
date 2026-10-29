@@ -400,3 +400,21 @@
   .review-page-footer{padding:12px 14px;gap:8px;flex-wrap:wrap}
   .review-page-footer button{flex:1}
 }
+
+
+/* Chat messages render Markdown rather than exposing source syntax */
+.message-bubble .markdown-preview{max-width:none;margin:0;min-width:0;font-size:inherit;line-height:1.65}
+.message-bubble .markdown-preview h1{font-size:1.2em;margin:.15em 0 .6em}
+.message-bubble .markdown-preview h2{font-size:1.1em;margin:.8em 0 .45em;padding-bottom:.25em}
+.message-bubble .markdown-preview h3,.message-bubble .markdown-preview h4{font-size:1em;margin:.7em 0 .35em}
+.message-bubble .markdown-preview p{margin:.25em 0 .55em;white-space:pre-wrap}
+.message-bubble .markdown-preview p:last-child{margin-bottom:0}
+.message-bubble .markdown-preview .markdown-space{height:.15em}
+.message-bubble .markdown-preview .markdown-list-item{gap:7px;margin:.2em 0}
+.message-bubble .markdown-preview .markdown-list-item>span{flex-basis:16px}
+.message-bubble .markdown-preview pre{max-width:100%;margin:.6em 0;padding:10px 12px;font-size:.9em}
+.message-bubble .markdown-preview blockquote{margin:.6em 0;padding-left:10px}
+.message-bubble .markdown-preview .markdown-list-item.task{gap:8px;align-items:flex-start}
+.message-bubble .markdown-preview .markdown-list-item.task input{width:14px;height:14px;flex:0 0 14px;margin:4px 0 0;accent-color:var(--accent,#315efb)}
+.message-bubble .markdown-preview a{overflow-wrap:anywhere}
+.message-bubble .markdown-preview a:hover{opacity:.82}
