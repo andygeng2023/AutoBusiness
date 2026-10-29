@@ -42,7 +42,7 @@ const describeError = (error: unknown, fallback: string) => {
   }
   return fallback;
 };
-declare global { interface Window { puter?: { auth?: { isSignedIn?: () => boolean; signIn?: () => Promise<unknown> }; ai?: { chat: (prompt: string, options?: Record<string, unknown>) => Promise<unknown> } } } }
+declare global { interface Window { puter?: { auth?: { isSignedIn?: () => boolean; signIn?: () => Promise<unknown> }; ai?: { chat: (prompt: string | Array<{ role: string; content: string }>, options?: Record<string, unknown>) => Promise<unknown> } } } }
 
 export default function App() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -320,41 +320,84 @@ export default function App() {
   };
   const sendMessage = async (event: FormEvent) => {
     event.preventDefault();
-    if (!message.trim() || !activeConversation) return;
-    const text = message.trim(); setMessage("");
+    if (!message.trim() || !activeConversation || busy) return;
+    const text = message.trim();
+    setMessage("");
     const sent: Message = { id: crypto.randomUUID(), from: "you", text, time: nowTime(), createdAt: new Date().toISOString() };
+    const history = [...activeConversation.messages, sent];
     setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, sent] } : c));
-    if (activeConversation.kind === "private" && activeConversation.members.length === 1 && settings.connectors.includes("Puter AI")) {
-      const emp = employeeMap.get(activeConversation.members[0]);
-      if (!emp) return;
-      setBusy(true);
-      try {
-        let reply = "";
-        if (!window.puter?.ai?.chat) throw new Error("Puter.js did not load. Refresh the page and try again.");
-        // Puter sign-in is separate from AutoBusiness/Supabase sign-in. Start it from this submit action.
-        if (window.puter.auth?.isSignedIn && !window.puter.auth.isSignedIn()) {
-          if (!window.puter.auth.signIn) throw new Error("Puter sign-in is unavailable. Refresh the page and try again.");
-          await window.puter.auth.signIn();
-        }
-        const prompt = "You are " + emp.name + ", " + emp.role + " in a company workspace. Tone: " + emp.tone + ". Custom instructions: " + emp.instructions + ". Current task: " + (emp.task || "none") + ". Respond helpfully and concisely to this message: " + text;
-        const model = emp.model.includes("Claude") ? "claude-sonnet-4" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
-        const result = await window.puter.ai.chat(prompt, { model, normalize: true });
+
+    const aiEnabled = settings.connectors.includes("Puter AI");
+    if (!aiEnabled) {
+      notify("Message saved. Enable the Puter AI connector in Settings to receive AI replies.");
+      return;
+    }
+    if (!window.puter?.ai?.chat) {
+      notify("Puter.js did not load. Refresh the page and try again.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      // Puter authentication is separate from AutoBusiness/Supabase authentication.
+      if (window.puter.auth?.isSignedIn && !window.puter.auth.isSignedIn()) {
+        if (!window.puter.auth.signIn) throw new Error("Puter sign-in is unavailable. Refresh the page and try again.");
+        await window.puter.auth.signIn();
+      }
+
+      const dialogue = history.map((m) => {
+        const speaker = m.from === "you" ? "User" : m.from === "system" ? "System" : employeeMap.get(m.from)?.name ?? "Team member";
+        return speaker + ": " + m.text;
+      }).join("\\n\\n");
+      const targets = activeConversation.kind === "group"
+        ? activeConversation.members.map((id) => employeeMap.get(id)).filter((emp): emp is Employee => Boolean(emp) && emp?.status !== "Paused")
+        : activeConversation.members.length === 1
+          ? [employeeMap.get(activeConversation.members[0])].filter((emp): emp is Employee => Boolean(emp))
+          : [];
+
+      if (!targets.length) {
+        notify("No available AI employees are members of this conversation.");
+        return;
+      }
+
+      // Every member receives the same full dialogue and the latest request. Each decides
+      // independently whether they have a useful contribution to make to the group.
+      const replies = await Promise.all(targets.map(async (emp) => {
+        const model = emp.model.includes("Claude") ? "claude-sonnet-4-6" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
+        const groupInstruction = activeConversation.kind === "group"
+          ? "You are participating in a group conversation with other employees. Read the entire dialogue and the latest user request. Decide independently whether your role and expertise add something useful. If you have no meaningful contribution, output exactly [[NO_REPLY]] and nothing else. Do not reply just to acknowledge the message. If you do reply, address the user or build on another team member's point; do not pretend to be another employee."
+          : "Reply directly to the latest user message. Use the previous dialogue as conversation memory. Do not repeat information unnecessarily.";
+        const prompt = [
+          { role: "system", content: "You are " + emp.name + ", " + emp.role + " in the " + company?.name + " workspace. Tone: " + emp.tone + ". Custom instructions: " + (emp.instructions || "Be accurate and useful.") + ". Current task: " + (emp.task || "none") + ". " + groupInstruction },
+          { role: "user", content: "FULL CONVERSATION HISTORY (oldest first):\\n\\n" + dialogue + "\\n\\nLATEST REQUEST: " + text + "\\n\\nUse the history as your working memory for this reply. Keep relevant facts, decisions, preferences, and unresolved questions consistent. Answer only the latest request." }
+        ];
+        const result = await window.puter!.ai!.chat(prompt, { model, normalize: true });
         const content = (result as { message?: { content?: unknown } })?.message?.content;
-        reply = typeof result === "string" ? result : typeof content === "string" ? content : Array.isArray(content) ? content.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "").join("\n") : "";
-        if (!reply.trim()) throw new Error("Puter returned an empty reply. Check your Puter account and try again.");
-        const response: Message = { id: crypto.randomUUID(), from: emp.id, text: reply, time: nowTime(), createdAt: new Date().toISOString() };
-        setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, response] } : c));
-      } catch (error) {
-        const reason = describeError(error, "Unknown Puter error");
-        const detail = /popup_blocked/i.test(reason)
-          ? "Puter sign-in popup was blocked. Allow pop-ups for this site, then send your message again."
-          : /auth_window_closed/i.test(reason)
-            ? "Puter sign-in was cancelled. Sign in to Puter to receive AI replies."
-            : "Puter AI request failed: " + reason;
-        setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: emp.id, text: detail + " Your original message is saved.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
-      } finally { setBusy(false); }
-    } else if (activeConversation.kind === "private" && activeConversation.members.length === 1) {
-      notify("Message saved, but Puter AI is disabled in Settings.");
+        const answer = typeof result === "string" ? result : typeof content === "string" ? content : Array.isArray(content) ? content.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "").join("\\n") : "";
+        return { emp, answer: answer.trim() };
+      }));
+
+      const responses: Message[] = replies
+        .filter(({ answer }) => answer && answer !== "[[NO_REPLY]]")
+        .map(({ emp, answer }) => ({ id: crypto.randomUUID(), from: emp.id, text: answer, time: nowTime(), createdAt: new Date().toISOString() }));
+
+      if (responses.length) {
+        setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, ...responses] } : c));
+      } else if (activeConversation.kind === "group") {
+        setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: "system", text: "The team reviewed the message; nobody had a useful contribution to add yet.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
+      } else if (!replies[0]?.answer) {
+        throw new Error("Puter returned an empty reply. Check the selected model and your Puter account.");
+      }
+    } catch (error) {
+      const reason = describeError(error, "Unknown Puter error");
+      const detail = /popup_blocked/i.test(reason)
+        ? "Puter sign-in popup was blocked. Allow pop-ups for this site, then send your message again."
+        : /auth_window_closed/i.test(reason)
+          ? "Puter sign-in was cancelled. Sign in to Puter to receive AI replies."
+          : "Puter AI request failed: " + reason;
+      setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: "system", text: detail + " Your original message is saved.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
+    } finally {
+      setBusy(false);
     }
   };
   const runJob = async (jobId: string, feedbackOverride?: string) => {
