@@ -670,10 +670,6 @@ export default function App() {
       const modelFor = (employee: Employee) => freeModels.some((item) => item.id === employee.model) ? employee.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
       const department = departmentPath(emp.deptId);
       const manager = emp.managerId ? employeeMap.get(emp.managerId) : undefined;
-      const reviewer = manager && manager.status !== "Paused"
-        ? manager
-        : employees.find((candidate) => candidate.id !== emp.id && candidate.status !== "Paused" && candidate.deptId === emp.deptId)
-          ?? employees.find((candidate) => candidate.id !== emp.id && candidate.status !== "Paused");
       const room = await ensureCollaborationRoom();
       const addWorkNote = (employeeId: string, text: string) => {
         if (room) appendAgentMessages(room, [{ id: crypto.randomUUID(), from: employeeId, text, time: nowTime(), createdAt: new Date().toISOString(), jobId }]);
