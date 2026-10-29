@@ -214,3 +214,53 @@
     padding-right: 9px;
   }
 }
+
+
+/* Management: nested organisation tree, focused employee profile and directory suggestions. */
+.management-page { max-width: 1500px; }
+.management-layout { display:grid; grid-template-columns:minmax(300px,1fr) minmax(290px,360px); align-items:start; gap:18px; }
+.management-tree { min-width:0; padding:18px 20px 22px; }
+.management-tree-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding-bottom:14px; border-bottom:1px solid #f0eff5; }
+.management-tree-head h2 { margin:0; font-size:16px; }
+.management-tree-head p { margin:5px 0 0; color:#85879a; font-size:11px; }
+.org-tree { padding-top:10px; }
+.org-tree .department { margin:0; }
+.org-tree .department-label { display:flex; align-items:center; gap:8px; min-height:39px; padding-top:8px; padding-bottom:8px; color:#45465b; font-size:12px; font-weight:700; border-bottom:1px solid #f4f3f8; }
+.org-tree .department-label .department-dot { flex:0 0 auto; }
+.org-tree .muted-count { margin-left:auto; color:#999bad; font-size:10px; }
+.org-tree .employee-row { display:flex; align-items:center; gap:10px; width:calc(100% - 10px); min-width:0; margin:4px 0 4px 10px; padding:9px 10px; border:1px solid transparent; border-radius:9px; background:transparent; text-align:left; cursor:pointer; }
+.org-tree .employee-row:hover,.org-tree .employee-row.selected { background:#f7f6ff; border-color:#e9e6ff; }
+.org-tree .employee-row-copy { min-width:0; flex:1; }
+.org-tree .employee-row-copy strong,.org-tree .employee-row-copy small { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.org-tree .employee-row-copy strong { font-size:11px; color:#393a50; }
+.org-tree .employee-row-copy small { margin-top:3px; color:#8a8c9e; font-size:10px; }
+.org-tree .status-dot { flex:0 0 auto; }
+.management-page .employee-detail { min-width:0; padding:20px; }
+.management-suggestions { padding:12px 0 4px; }
+.suggestion-heading { padding:10px 7px 7px; color:#9698a9; font-size:9px; font-weight:800; letter-spacing:.8px; }
+.department-suggest-heading { margin-top:9px; border-top:1px solid #f0eff5; padding-top:16px; }
+.suggested-person,.suggested-department { display:flex; align-items:center; gap:9px; width:100%; min-width:0; padding:8px 7px; border:0; border-radius:8px; background:transparent; text-align:left; cursor:pointer; color:#45465b; }
+.suggested-person:hover,.suggested-department:hover { background:#f4f3fb; }
+.suggested-person>span:nth-child(2) { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.suggested-person strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
+.suggested-person small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#9294a5; font-size:10px; }
+.suggested-department { font-size:11px; }
+.suggested-department .muted-count { margin-left:auto; }
+.chat-window { position:relative; }
+.chat-details-panel { position:absolute; z-index:25; top:62px; right:12px; width:min(320px,calc(100% - 24px)); max-height:calc(100% - 80px); overflow-y:auto; padding:14px; border:1px solid #e7e5f0; border-radius:12px; background:#fff; box-shadow:0 18px 48px #24213d1f; }
+.chat-details-title { display:flex; align-items:center; justify-content:space-between; gap:12px; padding-bottom:12px; border-bottom:1px solid #f0eff5; }
+.chat-details-title>div { display:flex; flex-direction:column; gap:3px; }
+.chat-details-title strong { font-size:13px; }
+.chat-details-title small { font-size:10px; color:#8c8ea0; }
+.chat-details-panel .employee-search { display:flex; align-items:center; gap:8px; margin:12px 0 8px; padding:0 10px; min-width:0; border:1px solid #e8e7f0; border-radius:8px; color:#9698a9; }
+.chat-details-panel .employee-search input { width:100%; min-width:0; padding:10px 0; border:0; outline:0; background:transparent; font:inherit; font-size:11px; color:#45465b; }
+.chat-detail-person { display:flex; align-items:center; gap:9px; width:100%; min-width:0; padding:9px 6px; border:0; border-radius:8px; background:transparent; text-align:left; cursor:pointer; }
+.chat-detail-person:hover { background:#f6f5fb; }
+.chat-detail-person>span:nth-child(2) { display:flex; flex-direction:column; gap:3px; flex:1; min-width:0; }
+.chat-detail-person strong,.chat-detail-person small { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.chat-detail-person strong { font-size:11px; color:#393a50; }
+.chat-detail-person small { font-size:10px; color:#9092a3; }
+.employee-quick-profile { width:min(560px,calc(100vw - 28px)); max-height:86vh; overflow:auto; }
+.employee-quick-profile .profile-value { margin:5px 0 14px; color:#696b80; font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+@media(max-width:980px) { .management-layout { grid-template-columns:minmax(0,1fr); } .management-page .employee-detail { width:100%; } }
+@media(max-width:600px) { .management-tree { padding:14px 11px; } .management-tree-head { align-items:flex-start; } .management-tree-head .secondary-button { white-space:nowrap; } .chat-details-panel { right:8px; width:calc(100% - 16px); } }
