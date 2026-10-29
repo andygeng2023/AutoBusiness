@@ -322,3 +322,28 @@
   .auth-card{padding:24px 20px}
 }
 @media(prefers-reduced-motion:reduce){.sidebar,.sidebar *{transition:none!important}}
+
+
+/* Reporting hierarchy and nested department controls */
+.heading-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap}
+.department-label{display:flex;align-items:center;gap:8px;min-height:32px}
+.dept-add-button{margin-left:auto;flex:0 0 auto;opacity:0;transition:opacity .15s ease}
+.department:hover>.department-label .dept-add-button,.dept-add-button:focus-visible{opacity:1}
+.employee-row-copy{min-width:0}
+.employee-row-copy small{white-space:normal;overflow-wrap:anywhere;line-height:1.35}
+.reporting-summary{display:flex;align-items:flex-start;gap:16px;padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}
+.reporting-label{width:86px;flex:0 0 86px;color:var(--muted);font-size:12px}
+.reporting-summary>strong{font-weight:600}
+.reporting-people{display:flex;flex-direction:column;gap:7px;flex:1;min-width:0}
+.reporting-people button,.profile-report-row{display:flex;align-items:center;gap:9px;width:100%;min-width:0;text-align:left;background:transparent;border:0;padding:5px 0;color:var(--ink)}
+.reporting-people button>span:last-child,.profile-report-row>span:nth-child(2){display:flex;flex-direction:column;gap:2px;min-width:0}
+.reporting-people button strong,.profile-report-row strong{font-size:12px;font-weight:600}
+.reporting-people button small,.profile-report-row small{font-size:11px;color:var(--muted)}
+.profile-report-row{border-bottom:1px solid var(--line)}
+.profile-report-row>svg{margin-left:auto;color:var(--muted)}
+.chat-details-empty{padding:10px 4px;color:var(--muted);font-size:12px;line-height:1.5}
+@media (max-width:700px){
+  .heading-actions{width:100%;justify-content:flex-start}
+  .heading-actions button{flex:1}
+  .dept-add-button{opacity:1}
+}
