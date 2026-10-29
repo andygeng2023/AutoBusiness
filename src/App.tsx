@@ -395,7 +395,7 @@ export default function App() {
           const raw = typeof result === "string" ? result : typeof content === "string" ? content : Array.isArray(content) ? content.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "").join("\\n") : "";
           let decision: { action?: string; reply?: string; title?: string; description?: string } = {};
           try {
-            const json = raw.trim().replace(/^\x60\x60\x60(?:json)?\\s*/i, "").replace(/\\s*\x60\x60\x60$/, "");
+            const json = raw.trim().replace(/^\x60\x60\x60(?:json)?\s*/i, "").replace(/\s*\x60\x60\x60$/, "");
             decision = JSON.parse(json);
           } catch {
             // Gracefully support a provider response that ignored the JSON-only instruction.
@@ -421,7 +421,7 @@ export default function App() {
           if (decision.action === "ignore") return { emp, answer: "[[NO_REPLY]]", error: "" };
           return { emp, answer: (decision.reply || raw).trim(), error: "", jobId: undefined };
         } catch (error) {
-          return { emp, answer: "", error: describeError(error, "Unknown Puter error") };
+          return { emp, answer: "", error: describeError(error, "Unknown Puter error"), jobId: undefined };
         }
       }));
 
