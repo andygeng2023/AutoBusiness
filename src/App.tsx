@@ -767,7 +767,6 @@ export default function App() {
       }
       const activeJobs = jobs.filter((job) => ["Queued", "In progress", "Submitted", "Rejected"].includes(job.status));
       const activeGoals = goals.filter((goal) => goal.status === "active" || goal.status === "planned");
-      if (!activeJobs.length && !activeGoals.length) return;
       if (Date.now() - lastTeamPulseRef.current < 60 * 1000) return;
       const activeEmployees = employees.filter((employee) => employee.status !== "Paused");
       if (activeEmployees.length < 2) return;
@@ -788,8 +787,8 @@ export default function App() {
         const actorModel = freeModels.some((item) => item.id === actor.model) ? actor.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
         const peerModel = freeModels.some((item) => item.id === peer.model) ? peer.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
         const update = (await requestOpenRouter(actorModel, [
-          { role: "system", content: "You are " + actor.name + ", " + actor.role + " at " + company.name + ". You are an autonomous teammate who can coordinate with coworkers. Your manager is " + managerNameFor(actor.managerId) + ". Use only the supplied workspace facts. Identify one useful coordination point, ask " + peer.name + " for input, or return exactly [NO_UPDATE] when nothing new and actionable is needed. Do not invent progress, decisions, metrics, or actions. Keep any message under 120 words; do not repeat previous check-ins." },
-          { role: "user", content: "ACTIVE JOBS:\n" + (jobContext || "No open jobs.") + "\n\nGOALS:\n" + (goalContext || "No active goals.") + "\n\nRECENT TEAM COLLABORATION:\n" + (priorTeamChat || "No previous collaboration messages.") + "\n\nWrite one genuinely useful internal coordination message, or [NO_UPDATE]." }
+          { role: "system", content: "You are " + actor.name + ", " + actor.role + " at " + company.name + ". You are an autonomous teammate who can coordinate with coworkers. Your manager is " + managerNameFor(actor.managerId) + ". Use only the supplied workspace facts. Work like a real colleague: share a concise work note about what you are doing and why, ask " + peer.name + " for a concrete contribution, follow up on unfinished discussion, or suggest one useful next step based on recent team work. Do not invent progress, decisions, metrics, or actions. When there is no active job, use recent team messages and goals to make a grounded coordination suggestion rather than generic small talk. Return exactly [NO_UPDATE] only when there is genuinely nothing useful to add. Keep under 120 words and do not repeat previous check-ins." },
+          { role: "user", content: "ACTIVE JOBS:\n" + (jobContext || "No open jobs.") + "\n\nGOALS:\n" + (goalContext || "No active goals.") + "\n\nRECENT TEAM COLLABORATION:\n" + (priorTeamChat || "No previous collaboration messages.") + "\n\nWrite a concise internal update that states the action or next step and a short rationale, then invites a concrete response from the colleague. Active jobs: " + (activeJobs.length ? "listed above" : "none currently active") + ". Return [NO_UPDATE] only if no useful coordination is possible." }
         ], openRouterKey)).trim();
         if (!update || /^\[NO_UPDATE\]$/i.test(update) || /^NO_ACTION$/i.test(update)) return;
         const reply = (await requestOpenRouter(peerModel, [
