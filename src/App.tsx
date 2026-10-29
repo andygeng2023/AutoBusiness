@@ -44,6 +44,16 @@ const describeError = (error: unknown, fallback: string) => {
   }
   return fallback;
 };
+const requestOpenRouter = async (model: string, messages: Array<{ role: string; content: string }>, apiKey: string): Promise<string> => {
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + apiKey.trim(), "Content-Type": "application/json", "HTTP-Referer": window.location.origin, "X-Title": "AutoBusiness" }, body: JSON.stringify({ model, messages, temperature: 0.4 }) });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.error?.message || `OpenRouter request failed (${response.status})`);
+  const content = payload?.choices?.[0]?.message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return content.map((part: { text?: string }) => part?.text ?? "").join("\n");
+  return "";
+};
+
 declare global { interface Window {} }
 
 export default function App() {
@@ -342,15 +352,6 @@ export default function App() {
     setBusy(true);
     try {
 
-      const requestOpenRouter = async (model: string, messages: Array<{ role: string; content: string }>, apiKey: string): Promise<string> => {
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + apiKey.trim(), "Content-Type": "application/json", "HTTP-Referer": window.location.origin, "X-Title": "AutoBusiness" }, body: JSON.stringify({ model, messages, temperature: 0.4 }) });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(payload?.error?.message || `OpenRouter request failed (${response.status})`);
-        const content = payload?.choices?.[0]?.message?.content;
-        if (typeof content === "string") return content;
-        if (Array.isArray(content)) return content.map((part: { text?: string }) => part?.text ?? "").join("\n");
-        return "";
-      };
       const dialogue = activeConversation.messages.map((m) => {
         const speaker = m.from === "you" ? "User" : m.from === "system" ? "System" : employeeMap.get(m.from)?.name ?? "Team member";
         return speaker + ": " + m.text;
@@ -458,24 +459,17 @@ export default function App() {
     }
   };
   const runJob = async (jobId: string, feedbackOverride?: string) => {
-    if (!settings.connectors.includes("OpenRouter")) { notify("Enable the OpenRouter connector in Settings before running AI jobs"); return; }
+    if (!settings.connectors.includes("OpenRouter")) { notify("Enable OpenRouter in Settings before running AI jobs"); return; }
+    if (!openRouterKey.trim()) { notify("Add your OpenRouter API key in Settings → Connectors first."); setPage("Settings"); setActiveSettings("Connectors"); return; }
     const job = jobs.find((j) => j.id === jobId);
     if (!job || busy) return;
     const emp = employeeMap.get(job.employeeId);
     if (!emp) { notify("This job has no assigned employee"); return; }
-    if (!window.openrouter?.ai?.chat) { notify("AI execution is unavailable: OpenRouter did not load"); return; }
     setBusy(true);
     try {
-      // This runs from the user's Run/Retry click, allowing OpenRouter to open its sign-in popup.
-      if (window.openrouter.auth?.isSignedIn && !window.openrouter.auth.isSignedIn()) {
-        if (!window.openrouter.auth.signIn) throw new Error("OpenRouter sign-in is unavailable. Refresh the page and try again.");
-        await window.openrouter.auth.signIn();
-      }
-      const prompt = "You are " + emp.name + ", " + emp.role + " working on a delegated job in a company workspace. Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\n\nJOB: " + job.title + "\n\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\n\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\n\nProduce the actual deliverable for this job, not a plan to do it. Use clear headings and concrete content. Address any previous review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly.";
-      const model = emp.model.includes("Claude") ? "claude-sonnet-4-6" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
-      const response = await window.openrouter.ai.chat(prompt, { model, normalize: true });
-      const content = (response as { message?: { content?: unknown } })?.message?.content;
-      const output = typeof response === "string" ? response : typeof content === "string" ? content : Array.isArray(content) ? content.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "").join("\n") : "";
+      const prompt = "You are " + emp.name + ", " + emp.role + " working on a delegated job in a company workspace. Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\\n\\nJOB: " + job.title + "\\n\\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\\n\\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\\n\\nProduce the actual deliverable for this job, not a plan to do it. Use clear headings and concrete content. Address any previous review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly.";
+      const model = freeModels.some((item) => item.id === emp.model) ? emp.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
+      const output = await requestOpenRouter(model, [{ role: "user", content: prompt }], openRouterKey);
       if (!output.trim()) throw new Error("The AI provider returned an empty deliverable.");
       setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Submitted", result: output, submittedAt: new Date().toISOString() } : j));
       setEmployees((old) => old.map((e) => e.id === emp.id ? { ...e, status: "Needs review", task: job.title } : e));
@@ -484,7 +478,7 @@ export default function App() {
       notify("Deliverable created — review the work");
     } catch (error) {
       const reason = describeError(error, "Unknown OpenRouter error");
-      notify(/popup_blocked/i.test(reason) ? "OpenRouter sign-in popup was blocked. Allow pop-ups for this site and retry." : /auth_window_closed/i.test(reason) ? "OpenRouter sign-in was cancelled. Sign in to OpenRouter before running AI jobs." : "AI job failed: " + reason);
+      notify("AI job failed: " + reason);
     } finally { setBusy(false); }
   };
   const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
