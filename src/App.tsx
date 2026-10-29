@@ -24,14 +24,16 @@ const seedDepts: Dept[] = [
   { id: "content", name: "Content", parentId: "creative" }, { id: "design", name: "Design", parentId: "creative" }
 ];
 const seedEmployees: Employee[] = [
-  { id: "maya", name: "Maya Chen", role: "Chief of Staff", deptId: "leadership", tone: "Clear & concise", model: "GPT-4o mini", instructions: "Prioritise the highest-impact work. Ask before making external commitments.", status: "Available" },
-  { id: "leo", name: "Leo Martin", role: "Brand Strategist", deptId: "creative", tone: "Thoughtful & creative", model: "GPT-4o", instructions: "Ground recommendations in audience insight and brand strategy.", status: "Working", task: "Q4 campaign positioning" },
-  { id: "amara", name: "Amara Okafor", role: "Content Lead", deptId: "content", tone: "Warm & articulate", model: "Claude Sonnet", instructions: "Write clearly, avoid clichés, and verify claims.", status: "Available" },
-  { id: "noah", name: "Noah Williams", role: "Growth Analyst", deptId: "growth", tone: "Analytical", model: "GPT-4o mini", instructions: "Show assumptions and use measurable outcomes.", status: "Needs review", task: "Weekly growth report" },
-  { id: "ella", name: "Ella Rossi", role: "Operations Manager", deptId: "operations", tone: "Practical & direct", model: "GPT-4o mini", instructions: "Prefer repeatable processes and concise checklists.", status: "Available" },
-  { id: "jules", name: "Jules Park", role: "Product Designer", deptId: "design", tone: "Curious & collaborative", model: "Claude Sonnet", instructions: "Explain trade-offs and design for accessibility.", status: "Available" }
+  { id: "maya", name: "Maya Chen", role: "Chief of Staff", deptId: "leadership", tone: "Clear & concise", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Prioritise the highest-impact work. Ask before making external commitments.", status: "Available" },
+  { id: "leo", name: "Leo Martin", role: "Brand Strategist", deptId: "creative", tone: "Thoughtful & creative", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Ground recommendations in audience insight and brand strategy.", status: "Working", task: "Q4 campaign positioning" },
+  { id: "amara", name: "Amara Okafor", role: "Content Lead", deptId: "content", tone: "Warm & articulate", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Write clearly, avoid clichés, and verify claims.", status: "Available" },
+  { id: "noah", name: "Noah Williams", role: "Growth Analyst", deptId: "growth", tone: "Analytical", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Show assumptions and use measurable outcomes.", status: "Needs review", task: "Weekly growth report" },
+  { id: "ella", name: "Ella Rossi", role: "Operations Manager", deptId: "operations", tone: "Practical & direct", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Prefer repeatable processes and concise checklists.", status: "Available" },
+  { id: "jules", name: "Jules Park", role: "Product Designer", deptId: "design", tone: "Curious & collaborative", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Explain trade-offs and design for accessibility.", status: "Available" }
 ];
-const defaultSettings: Settings = { approvalRequired: true, dailyLimit: 50, monthlyLimit: 900, autoRun: false, connectors: ["Puter AI", "Supabase"] };
+const defaultSettings: Settings = { approvalRequired: true, dailyLimit: 50, monthlyLimit: 900, autoRun: false, connectors: ["OpenRouter", "Supabase"] };
+const fallbackFreeModels = [{ id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B (free)" }, { id: "google/gemma-3-27b-it:free", name: "Gemma 3 27B (free)" }, { id: "deepseek/deepseek-r1-0528:free", name: "DeepSeek R1 (free)" }];
+const openRouterKeyName = "autobusiness_openrouter_api_key";
 const initials = (name: string) => name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 const nowTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const describeError = (error: unknown, fallback: string) => {
@@ -42,7 +44,7 @@ const describeError = (error: unknown, fallback: string) => {
   }
   return fallback;
 };
-declare global { interface Window { puter?: { auth?: { isSignedIn?: () => boolean; signIn?: () => Promise<unknown> }; ai?: { chat: (prompt: string | Array<{ role: string; content: string }>, options?: Record<string, unknown>) => Promise<unknown> } } } }
+declare global { interface Window {} }
 
 export default function App() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -102,9 +104,17 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [activeSettings, setActiveSettings] = useState("General");
+  const [openRouterKey, setOpenRouterKey] = useState(() => window.localStorage.getItem(openRouterKeyName) ?? "");
+  const [freeModels, setFreeModels] = useState(fallbackFreeModels);
+  const [modelsLoading, setModelsLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
+    setModelsLoading(true);
+    fetch("https://openrouter.ai/api/v1/models?filter=free").then((response) => { if (!response.ok) throw new Error("Could not load free models"); return response.json(); }).then((payload: { data?: Array<{ id?: string; name?: string; pricing?: { prompt?: string; completion?: string } }> }) => {
+      const models = (payload.data ?? []).filter((model) => model.id && model.id.endsWith(":free") && Number(model.pricing?.prompt ?? 1) === 0 && Number(model.pricing?.completion ?? 1) === 0).map((model) => ({ id: model.id!, name: (model.name || model.id!) + " (free)" })).sort((a, b) => a.name.localeCompare(b.name));
+      if (active && models.length) setFreeModels(models);
+    }).catch(() => { /* Keep only free fallback models if catalogue is unavailable. */ }).finally(() => { if (active) setModelsLoading(false); });
     supabase.auth.getSession().then(({ data, error }) => {
       if (!active) return;
       if (error) setAuthError(error.message);
@@ -157,7 +167,7 @@ export default function App() {
   }, [conversations, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (!user || !company || loadedCompanyId !== company.id) return;
-    void supabase.from("workspace_settings").upsert({ company_id: company.id, approval_required: settings.approvalRequired, auto_run: settings.autoRun, daily_usage_limit: settings.dailyLimit, monthly_usage_limit: settings.monthlyLimit, enabled_connectors: settings.connectors.map((c) => (({ "Puter AI": "puter", "Google Drive": "google_drive", "Web search": "web_search" } as Record<string, string>)[c] ?? c.toLowerCase().replaceAll(" ", "_"))) }, { onConflict: "company_id" }).then(({ error }) => { if (error) notify("Settings save failed: " + error.message); });
+    void supabase.from("workspace_settings").upsert({ company_id: company.id, approval_required: settings.approvalRequired, auto_run: settings.autoRun, daily_usage_limit: settings.dailyLimit, monthly_usage_limit: settings.monthlyLimit, enabled_connectors: settings.connectors.map((c) => (({ "OpenRouter": "openrouter" } as Record<string, string>)[c] ?? c.toLowerCase().replaceAll(" ", "_"))) }, { onConflict: "company_id" }).then(({ error }) => { if (error) notify("Settings save failed: " + error.message); });
   }, [settings, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (!user || !company || loadedCompanyId !== company.id) return;
@@ -261,7 +271,7 @@ export default function App() {
       setSettings(dbSettings ? {
         approvalRequired: dbSettings.approval_required, autoRun: dbSettings.auto_run,
         dailyLimit: dbSettings.daily_usage_limit, monthlyLimit: dbSettings.monthly_usage_limit,
-        connectors: Array.from(new Set([...(dbSettings.enabled_connectors ?? ["puter"]).map((name: string) => (({ puter: "Puter AI", github: "GitHub", supabase: "Supabase", google_drive: "Google Drive", slack: "Slack", web_search: "Web search" } as Record<string, string>)[name] ?? name)), "Supabase"]))
+        connectors: Array.from(new Set([...(dbSettings.enabled_connectors ?? ["openrouter"]).map((name: string) => (({ openrouter: "OpenRouter", supabase: "Supabase" } as Record<string, string>)[name] ?? name)), "Supabase"]))
       } : defaultSettings);
       setGoals((goalRes.data ?? []).map((row: any) => ({ id: row.id, title: row.title, description: row.description, progress: Number(row.progress), dueDate: row.due_date ?? undefined, status: row.status, createdBy: row.created_by })));
       setMemberRole(roleRes.data?.role ?? "member");
@@ -326,24 +336,21 @@ export default function App() {
     const sent: Message = { id: crypto.randomUUID(), from: "you", text, time: nowTime(), createdAt: new Date().toISOString() };
     setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, sent] } : c));
 
-    const aiEnabled = settings.connectors.includes("Puter AI");
-    if (!aiEnabled) {
-      notify("Message saved. Enable the Puter AI connector in Settings to receive AI replies.");
-      return;
-    }
-    if (!window.puter?.ai?.chat) {
-      notify("Puter.js did not load. Refresh the page and try again.");
-      return;
-    }
+    if (!settings.connectors.includes("OpenRouter")) { notify("Message saved. Enable OpenRouter in Settings to receive AI replies."); return; }
+    if (!openRouterKey.trim()) { notify("Add your OpenRouter API key in Settings → Connectors first."); setPage("Settings"); setActiveSettings("Connectors"); return; }
 
     setBusy(true);
     try {
-      // Puter authentication is separate from AutoBusiness/Supabase authentication.
-      if (window.puter.auth?.isSignedIn && !window.puter.auth.isSignedIn()) {
-        if (!window.puter.auth.signIn) throw new Error("Puter sign-in is unavailable. Refresh the page and try again.");
-        await window.puter.auth.signIn();
-      }
 
+      const requestOpenRouter = async (model: string, messages: Array<{ role: string; content: string }>, apiKey: string): Promise<string> => {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + apiKey.trim(), "Content-Type": "application/json", "HTTP-Referer": window.location.origin, "X-Title": "AutoBusiness" }, body: JSON.stringify({ model, messages, temperature: 0.4 }) });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload?.error?.message || `OpenRouter request failed (${response.status})`);
+        const content = payload?.choices?.[0]?.message?.content;
+        if (typeof content === "string") return content;
+        if (Array.isArray(content)) return content.map((part: { text?: string }) => part?.text ?? "").join("\n");
+        return "";
+      };
       const dialogue = activeConversation.messages.map((m) => {
         const speaker = m.from === "you" ? "User" : m.from === "system" ? "System" : employeeMap.get(m.from)?.name ?? "Team member";
         return speaker + ": " + m.text;
@@ -382,7 +389,7 @@ export default function App() {
       // independently whether they have a useful contribution to make to the group.
       const replies = await Promise.all(targets.map(async (emp) => {
         try {
-          const model = emp.model.includes("Claude") ? "claude-sonnet-4-6" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
+          const model = freeModels.some((item) => item.id === emp.model) ? emp.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
           const groupInstruction = activeConversation.kind === "group"
             ? "This is a group chat. Independently decide whether to reply, start a substantial assignment for yourself, or stay silent. Avoid acknowledgement-only replies and do not impersonate coworkers."
             : "This is a private chat. Decide whether to reply conversationally or open an assignment for yourself if the user has requested meaningful work.";
@@ -390,9 +397,7 @@ export default function App() {
             { role: "system", content: "You are " + emp.name + ", " + emp.role + " in the " + company?.name + " workspace. Tone: " + emp.tone + ". Custom instructions: " + (emp.instructions || "Be accurate and useful.") + ". Current task: " + (emp.task || "none") + ".\\n" + groupInstruction + "\\nReturn ONLY valid JSON with keys action, reply, title, description. action must be reply, start_job, or ignore. Use start_job when the request requires a substantive deliverable you should own and work on; title should be concise and description should capture the task, constraints, context and success criteria. Use reply for discussion/questions that do not need a tracked deliverable. Use ignore only when you have no useful contribution. In group chat, only employees with a useful role should act. Never claim work is completed before producing it." },
             { role: "user", content: workspaceMemoryFor(emp) + "\\n\\nCURRENT CONVERSATION (" + activeConversation.name + "):\\n" + (dialogue || "(No previous messages.)") + "\\n\\nLATEST REQUEST: " + text + "\\n\\nUse all supplied memory consistently. Do not create duplicate assignments for work already completed or in progress unless the user clearly requests a new one." }
           ];
-          const result = await window.puter!.ai!.chat(prompt, { model, normalize: true });
-          const content = (result as { message?: { content?: unknown } })?.message?.content;
-          const raw = typeof result === "string" ? result : typeof content === "string" ? content : Array.isArray(content) ? content.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "").join("\\n") : "";
+          const raw = await requestOpenRouter(model, prompt, openRouterKey);
           let decision: { action?: string; reply?: string; title?: string; description?: string } = {};
           try {
             const json = raw.trim().replace(/^\x60\x60\x60(?:json)?\s*/i, "").replace(/\s*\x60\x60\x60$/, "");
@@ -410,9 +415,7 @@ export default function App() {
               { role: "system", content: "You are " + emp.name + ", " + emp.role + ". Complete the assignment and produce the actual deliverable. Follow your instructions: " + (emp.instructions || "Be accurate and useful.") + ". Do not claim external actions or access you do not have. If blocked, clearly report the blocker and what is needed." },
               { role: "user", content: workspaceMemoryFor(emp) + "\\n\\nASSIGNMENT: " + job.title + "\\nBRIEF: " + job.description + "\\n\nCURRENT CHAT CONTEXT:\\n" + dialogue + "\\n\\nUSER'S LATEST REQUEST: " + text + "\\n\\nProduce the deliverable now, not a plan." }
             ];
-            const workResult = await window.puter!.ai!.chat(workPrompt, { model, normalize: true });
-            const workContent = (workResult as { message?: { content?: unknown } })?.message?.content;
-            const deliverable = (typeof workResult === "string" ? workResult : typeof workContent === "string" ? workContent : Array.isArray(workContent) ? workContent.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "").join("\\n") : "").trim();
+            const deliverable = (await requestOpenRouter(model, workPrompt, openRouterKey)).trim();
             if (!deliverable) throw new Error("The assignment was opened, but the AI returned an empty deliverable.");
             setJobs((old) => old.map((item) => item.id === job.id ? { ...item, status: "Submitted", result: deliverable, submittedAt: new Date().toISOString() } : item));
             setEmployees((old) => old.map((employee) => employee.id === emp.id ? { ...employee, status: "Needs review", task: job.title } : employee));
@@ -421,7 +424,7 @@ export default function App() {
           if (decision.action === "ignore") return { emp, answer: "[[NO_REPLY]]", error: "" };
           return { emp, answer: (decision.reply || raw).trim(), error: "", jobId: undefined };
         } catch (error) {
-          return { emp, answer: "", error: describeError(error, "Unknown Puter error"), jobId: undefined };
+          return { emp, answer: "", error: describeError(error, "Unknown OpenRouter error"), jobId: undefined };
         }
       }));
 
@@ -440,37 +443,37 @@ export default function App() {
         notify("Some AI replies failed: " + summary);
       }
       if (activeConversation.kind === "private" && !responses.length && !failures.length) {
-        throw new Error("Puter returned an empty reply. Check the selected model and your Puter account.");
+        throw new Error("OpenRouter returned an empty reply. Check the selected model and your OpenRouter account.");
       }
     } catch (error) {
-      const reason = describeError(error, "Unknown Puter error");
+      const reason = describeError(error, "Unknown OpenRouter error");
       const detail = /popup_blocked/i.test(reason)
-        ? "Puter sign-in popup was blocked. Allow pop-ups for this site, then send your message again."
+        ? "OpenRouter sign-in popup was blocked. Allow pop-ups for this site, then send your message again."
         : /auth_window_closed/i.test(reason)
-          ? "Puter sign-in was cancelled. Sign in to Puter to receive AI replies."
-          : "Puter AI request failed: " + reason;
+          ? "OpenRouter sign-in was cancelled. Sign in to OpenRouter to receive AI replies."
+          : "OpenRouter request failed: " + reason;
       setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: "system", text: detail + " Your original message is saved.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
     } finally {
       setBusy(false);
     }
   };
   const runJob = async (jobId: string, feedbackOverride?: string) => {
-    if (!settings.connectors.includes("Puter AI")) { notify("Enable the Puter AI connector in Settings before running AI jobs"); return; }
+    if (!settings.connectors.includes("OpenRouter")) { notify("Enable the OpenRouter connector in Settings before running AI jobs"); return; }
     const job = jobs.find((j) => j.id === jobId);
     if (!job || busy) return;
     const emp = employeeMap.get(job.employeeId);
     if (!emp) { notify("This job has no assigned employee"); return; }
-    if (!window.puter?.ai?.chat) { notify("AI execution is unavailable: Puter.js did not load"); return; }
+    if (!window.openrouter?.ai?.chat) { notify("AI execution is unavailable: OpenRouter did not load"); return; }
     setBusy(true);
     try {
-      // This runs from the user's Run/Retry click, allowing Puter to open its sign-in popup.
-      if (window.puter.auth?.isSignedIn && !window.puter.auth.isSignedIn()) {
-        if (!window.puter.auth.signIn) throw new Error("Puter sign-in is unavailable. Refresh the page and try again.");
-        await window.puter.auth.signIn();
+      // This runs from the user's Run/Retry click, allowing OpenRouter to open its sign-in popup.
+      if (window.openrouter.auth?.isSignedIn && !window.openrouter.auth.isSignedIn()) {
+        if (!window.openrouter.auth.signIn) throw new Error("OpenRouter sign-in is unavailable. Refresh the page and try again.");
+        await window.openrouter.auth.signIn();
       }
       const prompt = "You are " + emp.name + ", " + emp.role + " working on a delegated job in a company workspace. Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\n\nJOB: " + job.title + "\n\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\n\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\n\nProduce the actual deliverable for this job, not a plan to do it. Use clear headings and concrete content. Address any previous review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly.";
       const model = emp.model.includes("Claude") ? "claude-sonnet-4-6" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
-      const response = await window.puter.ai.chat(prompt, { model, normalize: true });
+      const response = await window.openrouter.ai.chat(prompt, { model, normalize: true });
       const content = (response as { message?: { content?: unknown } })?.message?.content;
       const output = typeof response === "string" ? response : typeof content === "string" ? content : Array.isArray(content) ? content.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "").join("\n") : "";
       if (!output.trim()) throw new Error("The AI provider returned an empty deliverable.");
@@ -480,8 +483,8 @@ export default function App() {
       setSelectedJobId(jobId);
       notify("Deliverable created — review the work");
     } catch (error) {
-      const reason = describeError(error, "Unknown Puter error");
-      notify(/popup_blocked/i.test(reason) ? "Puter sign-in popup was blocked. Allow pop-ups for this site and retry." : /auth_window_closed/i.test(reason) ? "Puter sign-in was cancelled. Sign in to Puter before running AI jobs." : "AI job failed: " + reason);
+      const reason = describeError(error, "Unknown OpenRouter error");
+      notify(/popup_blocked/i.test(reason) ? "OpenRouter sign-in popup was blocked. Allow pop-ups for this site and retry." : /auth_window_closed/i.test(reason) ? "OpenRouter sign-in was cancelled. Sign in to OpenRouter before running AI jobs." : "AI job failed: " + reason);
     } finally { setBusy(false); }
   };
   const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
@@ -560,7 +563,7 @@ export default function App() {
   const createEmployee = (event: FormEvent) => {
     event.preventDefault(); if (!employeeName.trim() || !employeeRole.trim()) return;
     const id = crypto.randomUUID();
-    setEmployees((old) => [...old, { id, name: employeeName.trim(), role: employeeRole.trim(), deptId: newEmployeeDept || depts[0]?.id || "leadership", tone: "Clear & concise", model: "GPT-4o mini", instructions: "", status: "Available" }]);
+    setEmployees((old) => [...old, { id, name: employeeName.trim(), role: employeeRole.trim(), deptId: newEmployeeDept || depts[0]?.id || "leadership", tone: "Clear & concise", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "", status: "Available" }]);
     setEmployeeName(""); setEmployeeRole(""); setNewEmployeeDept("leadership"); setShowEmployeeForm(false); setSelectedEmployee(id); notify("Employee created");
   };
   const createConversation = async (event: FormEvent) => {
@@ -648,11 +651,11 @@ export default function App() {
       <div className="topbar-right"><span className="saved-indicator"><span className="online-dot" /> Supabase connected</span><button className="icon-button" title="Help" onClick={() => notify("Help centre coming soon")}><CircleHelp size={17} /></button><button className="profile-button" title={"Sign out " + (user?.email ?? "")} onClick={() => void signOut()}>{initials(user?.email?.split("@")[0] ?? "U")}</button></div>
     </header>
     <div className="app-body">
-      {sidebarOpen && <aside className="sidebar primary-sidebar">
+      <aside className={"sidebar primary-sidebar " + (sidebarOpen ? "" : "manual-collapsed")}>
         <div className="workspace-label">WORKSPACE</div>
         <nav className="primary-nav">{nav.map(({ label, icon: Icon, count }) => <button key={label} title={label} className={"nav-item " + (page === label ? "active" : "")} onClick={() => changePage(label)}><Icon size={17} strokeWidth={1.8} /><span>{label}</span>{count ? <span className="nav-count">{count}</span> : null}</button>)}</nav>
-      </aside>}
-      {sidebarOpen && <aside className="sidebar context-sidebar">
+      </aside>
+      <aside className={"sidebar context-sidebar " + (sidebarOpen ? "" : "manual-collapsed")}>
         <div className="context-sidebar-heading"><span>{page === "Communication" ? "COMMUNICATION" : page === "Employees" ? "EMPLOYEES" : page === "Settings" ? "SETTINGS" : page.toUpperCase()}</span></div>
         {page === "Communication" ? <>
           <div className="side-section-head"><span>MESSAGES</span><button className="tiny-icon" onClick={() => setShowChatForm(true)} title="New chat"><Plus size={15} /></button></div>
@@ -665,7 +668,7 @@ export default function App() {
           <div className="department-list">{departmentTree()}</div><button className="side-new-button" onClick={() => setShowEmployeeForm(true)}><Plus size={14} /> Add employee</button>
         </> : page === "Settings" ? <>
           <div className="side-section-head"><span>SETTINGS</span></div>
-          {["General", "Security", "Rulesets", "Connectors", "Automation & limits"].map((item) => <button key={item} className={"nav-item subnav " + (activeSettings === item ? "active" : "")} onClick={() => setActiveSettings(item)}><span>{item}</span></button>)}
+          {[{ label: "General", icon: Settings2 }, { label: "Security", icon: ShieldCheck }, { label: "Rulesets", icon: LockKeyhole }, { label: "Connectors", icon: Workflow }, { label: "Automation & limits", icon: Gauge }].map(({ label, icon: SettingIcon }) => <button key={label} title={label} className={"nav-item subnav " + (activeSettings === label ? "active" : "")} onClick={() => setActiveSettings(label)}><SettingIcon size={20} /><span>{label}</span></button>)}
         </> : <>
           <div className="side-section-head"><span>QUICK ACCESS</span></div>
           <button className="quick-link" onClick={() => changePage("Jobs & approvals")}><Inbox size={15} /><span>Needs your review</span><span className="nav-count">{jobs.filter((j) => j.status === "Submitted").length}</span></button>
@@ -673,7 +676,7 @@ export default function App() {
           <div className="side-card"><div className="side-card-icon"><Zap size={15} /></div><strong>Your AI team</strong><p>Delegate work, review submissions, and keep everything moving.</p></div>
         </>}
         <div className="sidebar-bottom"><div className="usage-mini"><div className="usage-mini-top"><span>JOB COMPLETION</span><span>{jobs.filter((j) => j.status === "Approved").length} / {jobs.length}</span></div><div className="usage-track"><span style={{ width: (jobs.length ? jobs.filter((j) => j.status === "Approved").length / jobs.length * 100 : 0) + "%" }} /></div><small>Approved jobs in this workspace</small></div><button className="sidebar-company" onClick={() => setCompany(null)}><span className={"company-mini " + company.color}>{company.initials}</span><span><strong>{company.name}</strong><small>Free workspace</small></span><MoreHorizontal size={17} /></button></div>
-      </aside>}
+      </aside>
       <main className="main-panel">
         {page === "Dashboard" && <div className="page-wrap">
           <div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> Overview</div><h1>Welcome back, {(user?.email?.split("@")[0] ?? "there").replace(/[._-]/g, " ")} <span className="wave">✳</span></h1><p>Here’s what’s happening across {company.name} today.</p></div></div>
@@ -710,7 +713,7 @@ export default function App() {
             {!jobs.some((job) => job.employeeId === activeEmployee.id && ["Queued", "In progress", "Submitted"].includes(job.status)) && <p className="no-open-jobs">No open jobs assigned.</p>}
             <div className="detail-section-title">AI CONFIGURATION</div><label className="field-label">Department<select value={activeEmployee.deptId} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, deptId: e.target.value } : x))}>{depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
             <label className="field-label">Communication tone<select value={activeEmployee.tone} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, tone: e.target.value } : x))}><option>Clear & concise</option><option>Thoughtful & creative</option><option>Warm & articulate</option><option>Analytical</option><option>Practical & direct</option><option>Curious & collaborative</option><option>Formal</option><option>Friendly</option></select></label>
-            <label className="field-label">AI model<select value={activeEmployee.model} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, model: e.target.value } : x))}><option>GPT-4o mini</option><option>GPT-4o</option><option>Claude Sonnet</option><option>Auto</option></select></label>
+            <label className="field-label">AI model<select value={freeModels.some((item) => item.id === activeEmployee.model) ? activeEmployee.model : freeModels[0]?.id ?? fallbackFreeModels[0].id} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, model: e.target.value } : x))}>{freeModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select><small className="input-help">{modelsLoading ? "Loading current free model catalogue…" : "Only models with zero prompt and completion pricing are listed."}</small></label>
             <label className="field-label">Custom instructions<textarea rows={4} value={activeEmployee.instructions} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, instructions: e.target.value } : x))} placeholder="How should this employee work?" /></label>
             <div className="detail-note"><ShieldCheck size={15} /><span>Changes are saved to your cloud workspace.</span></div>
           </section>}
@@ -731,7 +734,7 @@ export default function App() {
           {activeSettings === "General" && <><h2>General preferences</h2><p className="settings-intro">Manage the basics for {company.name}.</p><label className="field-label">Company name<input value={company.name} onChange={(e) => { const updated = { ...company, name: e.target.value }; setCompany(updated); setCompanies((old) => old.map((item) => item.id === updated.id ? updated : item)); }} /></label>{(memberRole === "owner" || memberRole === "admin") && <div className="settings-info-row"><div><strong>Team access</strong><small>Invite a teammate by email. The link is limited to that email and expires in seven days.</small></div><button className="secondary-button compact-button" onClick={() => { setInviteUrl(""); setInviteEmail(""); setShowInviteForm(true); }}>Invite member</button></div>}<div className="settings-info-row"><div><strong>Workspace appearance</strong><small>Clean, light interface optimised for daily work.</small></div><span className="setting-pill">Light</span></div><div className="settings-info-row"><div><strong>Data storage</strong><small>Workspace data is stored in Supabase and shared with authorised company members.</small></div><span className="setting-pill green-pill">Cloud</span></div></>}
           {activeSettings === "Security" && <><h2>Security & permissions</h2><p className="settings-intro">Keep sensitive work under control.</p><div className="setting-toggle-row"><div><strong>Require approval before jobs run</strong><small>New assignments wait for a human to approve before they begin.</small></div><button className={"toggle " + (settings.approvalRequired ? "on" : "")} onClick={() => setSettings({ ...settings, approvalRequired: !settings.approvalRequired, autoRun: settings.approvalRequired ? false : settings.autoRun })}><span /></button></div><div className="settings-info-row"><div><strong>External actions</strong><small>External publishing and connector writes should require explicit approval.</small></div><span className="setting-pill">Approval gated</span></div><div className="settings-info-row"><div><strong>Credentials</strong><small>Never store provider secrets in frontend code. Use server-side secrets for production.</small></div><span className="setting-pill">Protected</span></div></>}
           {activeSettings === "Rulesets" && <><h2>Rulesets</h2><p className="settings-intro">Company-wide guardrails applied to every employee.</p><div className="rule-card"><span className="rule-icon"><ShieldCheck size={17} /></span><div><strong>Human approval for consequential actions</strong><small>Publishing, sending messages externally, spending and deleting data require confirmation.</small></div><span className="setting-pill green-pill">Enabled</span></div><div className="rule-card"><span className="rule-icon"><LockKeyhole size={17} /></span><div><strong>Keep company data private</strong><small>Employees should only use the context required for their assigned work.</small></div><span className="setting-pill green-pill">Enabled</span></div><div className="rule-card"><span className="rule-icon"><CheckCheck size={17} /></span><div><strong>Require evidence in submissions</strong><small>Ask employees to include the result, relevant links and unresolved issues.</small></div><span className="setting-pill green-pill">Enabled</span></div><button className="secondary-button" onClick={() => notify("Ruleset editor is planned for the next iteration")}><Plus size={14} /> Add custom ruleset</button></>}
-          {activeSettings === "Connectors" && <><h2>Enabled connectors</h2><p className="settings-intro">Manage services your company workspace can use.</p>{["Puter AI", "Supabase", "GitHub", "Google Drive", "Slack", "Web search"].map((name) => <div className="connector-row" key={name}><span className="connector-icon">{name === "Puter AI" ? <Sparkles size={17} /> : name === "Supabase" ? <Zap size={17} /> : name === "GitHub" ? <Command size={17} /> : <Workflow size={17} />}</span><div><strong>{name}</strong><small>{name === "Puter AI" ? "AI chat and model access in the browser" : name === "Supabase" ? "Database and authentication for this workspace" : name === "GitHub" ? "Repository and delivery workflows" : "Available to connect in a future iteration"}</small></div><button className={"connector-action " + (name === "Supabase" || (name === "Puter AI" && settings.connectors.includes(name)) ? "enabled" : "")} disabled={name !== "Puter AI" && name !== "Supabase"} onClick={() => { if (name !== "Puter AI") return; setSettings({ ...settings, connectors: settings.connectors.includes(name) ? settings.connectors.filter((x) => x !== name) : [...settings.connectors, name] }); }}>{name === "Supabase" ? <><Check size={13} /> Connected</> : name !== "Puter AI" ? "Not connected" : settings.connectors.includes(name) ? <><Check size={13} /> Enabled</> : "Enable"}</button></div>)}</>}
+          {activeSettings === "Connectors" && <><h2>Enabled connectors</h2><p className="settings-intro">Manage services your company workspace can use.</p>{["OpenRouter", "Supabase", "GitHub", "Google Drive", "Slack", "Web search"].map((name) => <div className="connector-row" key={name}><span className="connector-icon">{name === "OpenRouter" ? <Sparkles size={17} /> : name === "Supabase" ? <Zap size={17} /> : name === "GitHub" ? <Command size={17} /> : <Workflow size={17} />}</span><div><strong>{name}</strong><small>{name === "OpenRouter" ? "AI chat and model access in the browser" : name === "Supabase" ? "Database and authentication for this workspace" : name === "GitHub" ? "Repository and delivery workflows" : "Available to connect in a future iteration"}</small></div><button className={"connector-action " + (name === "Supabase" || (name === "OpenRouter" && settings.connectors.includes(name)) ? "enabled" : "")} disabled={name !== "OpenRouter" && name !== "Supabase"} onClick={() => { if (name !== "OpenRouter") return; setSettings({ ...settings, connectors: settings.connectors.includes(name) ? settings.connectors.filter((x) => x !== name) : [...settings.connectors, name] }); }}>{name === "Supabase" ? <><Check size={13} /> Connected</> : name !== "OpenRouter" ? "Not connected" : settings.connectors.includes(name) ? <><Check size={13} /> Enabled</> : "Enable"}</button></div>)}</>}
           {activeSettings === "Automation & limits" && <><h2>Automation & usage limits</h2><p className="settings-intro">Choose how much work can run without interrupting you.</p><div className="setting-toggle-row"><div><strong>Allow jobs to start without approval</strong><small>New jobs can move straight to In progress. You still explicitly generate the deliverable; no background worker runs automatically.</small></div><button className={"toggle " + (settings.autoRun ? "on" : "")} onClick={() => setSettings({ ...settings, autoRun: !settings.autoRun, approvalRequired: settings.autoRun })}><span /></button></div><label className="field-label">Daily job creation limit<input type="number" min="1" max="10000" value={settings.dailyLimit} onChange={(e) => setSettings({ ...settings, dailyLimit: Math.max(1, Number(e.target.value)) })} /></label><label className="field-label">Monthly job creation limit<input type="number" min="1" max="100000" value={settings.monthlyLimit} onChange={(e) => setSettings({ ...settings, monthlyLimit: Math.max(1, Number(e.target.value)) })} /></label><div className="usage-summary"><div className="usage-summary-top"><span>Deliverables with results</span><strong>{jobs.filter((j) => Boolean(j.result?.trim())).length} / {jobs.length}</strong></div><div className="usage-track"><span style={{ width: (jobs.length ? jobs.filter((j) => Boolean(j.result?.trim())).length / jobs.length * 100 : 0) + "%" }} /></div></div><p className="small-disclaimer">Provider token usage and billing are not exposed by the current browser AI integration. These figures count saved deliverables, not billable tokens.</p></>}
         </section></div></div>}
       </main>
