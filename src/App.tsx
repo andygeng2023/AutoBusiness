@@ -324,7 +324,6 @@ export default function App() {
     const text = message.trim();
     setMessage("");
     const sent: Message = { id: crypto.randomUUID(), from: "you", text, time: nowTime(), createdAt: new Date().toISOString() };
-    const history = [...activeConversation.messages, sent];
     setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, sent] } : c));
 
     const aiEnabled = settings.connectors.includes("Puter AI");
@@ -425,7 +424,7 @@ export default function App() {
         await window.puter.auth.signIn();
       }
       const prompt = "You are " + emp.name + ", " + emp.role + " working on a delegated job in a company workspace. Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\n\nJOB: " + job.title + "\n\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\n\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\n\nProduce the actual deliverable for this job, not a plan to do it. Use clear headings and concrete content. Address any previous review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly.";
-      const model = emp.model.includes("Claude") ? "claude-sonnet-4" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
+      const model = emp.model.includes("Claude") ? "claude-sonnet-4-6" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
       const response = await window.puter.ai.chat(prompt, { model, normalize: true });
       const content = (response as { message?: { content?: unknown } })?.message?.content;
       const output = typeof response === "string" ? response : typeof content === "string" ? content : Array.isArray(content) ? content.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "").join("\n") : "";
