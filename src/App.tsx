@@ -8,7 +8,7 @@ import {
 import "./styles.css";
 import { supabase } from "./supabase";
 
-type Employee = { id: string; name: string; role: string; deptId: string; tone: string; model: string; instructions: string; status: "Available" | "Working" | "Needs review" | "Paused"; task?: string };
+type Employee = { id: string; name: string; role: string; deptId: string; managerId?: string; tone: string; model: string; instructions: string; status: "Available" | "Working" | "Needs review" | "Paused"; task?: string };
 type Dept = { id: string; name: string; parentId?: string };
 type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string; reviewedBy?: string };
 type Message = { id: string; from: string; text: string; time: string; jobId?: string; createdAt?: string; senderUserId?: string };
@@ -25,13 +25,13 @@ const seedDepts: Dept[] = [
 ];
 const seedEmployees: Employee[] = [
   { id: "maya", name: "Maya Chen", role: "Chief of Staff", deptId: "leadership", tone: "Clear & concise", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Prioritise the highest-impact work. Ask before making external commitments.", status: "Available" },
-  { id: "leo", name: "Leo Martin", role: "Brand Strategist", deptId: "creative", tone: "Thoughtful & creative", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Ground recommendations in audience insight and brand strategy.", status: "Working", task: "Q4 campaign positioning" },
-  { id: "amara", name: "Amara Okafor", role: "Content Lead", deptId: "content", tone: "Warm & articulate", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Write clearly, avoid clichés, and verify claims.", status: "Available" },
-  { id: "noah", name: "Noah Williams", role: "Growth Analyst", deptId: "growth", tone: "Analytical", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Show assumptions and use measurable outcomes.", status: "Needs review", task: "Weekly growth report" },
-  { id: "ella", name: "Ella Rossi", role: "Operations Manager", deptId: "operations", tone: "Practical & direct", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Prefer repeatable processes and concise checklists.", status: "Available" },
-  { id: "jules", name: "Jules Park", role: "Product Designer", deptId: "design", tone: "Curious & collaborative", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Explain trade-offs and design for accessibility.", status: "Available" }
+  { id: "leo", name: "Leo Martin", role: "Brand Strategist", deptId: "creative", managerId: "maya", tone: "Thoughtful & creative", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Ground recommendations in audience insight and brand strategy.", status: "Working", task: "Q4 campaign positioning" },
+  { id: "amara", name: "Amara Okafor", role: "Content Lead", deptId: "content", managerId: "leo", tone: "Warm & articulate", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Write clearly, avoid clichés, and verify claims.", status: "Available" },
+  { id: "noah", name: "Noah Williams", role: "Growth Analyst", deptId: "growth", managerId: "maya", tone: "Analytical", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Show assumptions and use measurable outcomes.", status: "Needs review", task: "Weekly growth report" },
+  { id: "ella", name: "Ella Rossi", role: "Operations Manager", deptId: "operations", managerId: "maya", tone: "Practical & direct", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Prefer repeatable processes and concise checklists.", status: "Available" },
+  { id: "jules", name: "Jules Park", role: "Product Designer", deptId: "design", managerId: "leo", tone: "Curious & collaborative", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Explain trade-offs and design for accessibility.", status: "Available" }
 ];
-const defaultSettings: Settings = { approvalRequired: true, dailyLimit: 50, monthlyLimit: 900, autoRun: false, connectors: ["OpenRouter", "Supabase"] };
+const defaultSettings: Settings = { approvalRequired: true, dailyLimit: 50, monthlyLimit: 900, autoRun: true, connectors: ["OpenRouter", "Supabase"] };
 const demoCompany: Company = { id: "demo-company", name: "Northstar Studio", industry: "Creative services", initials: "NS", color: "blue", description: "Interactive sample workspace" };
 const makeDemoJobs = (): Job[] => {
   const now = Date.now();
@@ -134,12 +134,20 @@ export default function App() {
   const [jobEmployee, setJobEmployee] = useState("");
   const [showJobForm, setShowJobForm] = useState(false);
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
+  const [showDepartmentForm, setShowDepartmentForm] = useState(false);
+  const [departmentName, setDepartmentName] = useState("");
+  const [newDepartmentParent, setNewDepartmentParent] = useState("__root__");
   const [showCompanyForm, setShowCompanyForm] = useState(false);
   const [showChatForm, setShowChatForm] = useState(false);
   const [companyName, setCompanyName] = useState("");
   const [employeeName, setEmployeeName] = useState("");
   const [employeeRole, setEmployeeRole] = useState("");
-  const [newEmployeeDept, setNewEmployeeDept] = useState("leadership");
+  const [newEmployeeDept, setNewEmployeeDept] = useState("");
+  const [newEmployeeManager, setNewEmployeeManager] = useState("");
+  const autoRunJobLockRef = useRef(false);
+  const teamPulseLockRef = useRef(false);
+  const lastTeamPulseRef = useRef(0);
+  const collaborationRoomRef = useRef<Promise<Conversation | null> | null>(null);
   const [newChatName, setNewChatName] = useState("");
   const [newChatMembers, setNewChatMembers] = useState<string[]>([]);
   const [toast, setToast] = useState("");
@@ -189,7 +197,7 @@ export default function App() {
   useEffect(() => {
     if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     const companyId = company.id;
-    void supabase.from("employees").upsert(employees.map((e) => ({ id: e.id, company_id: companyId, department_id: e.deptId || null, name: e.name, role: e.role, tone: e.tone, model: e.model, custom_instructions: e.instructions, status: e.status === "Needs review" ? "needs_review" : e.status.toLowerCase(), current_task: e.task ?? null, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && employees.length) notify("Employee save failed: " + error.message); });
+    void supabase.from("employees").upsert(employees.map((e) => ({ id: e.id, company_id: companyId, department_id: e.deptId || null, manager_id: e.managerId ?? null, name: e.name, role: e.role, tone: e.tone, model: e.model, custom_instructions: e.instructions, status: e.status === "Needs review" ? "needs_review" : e.status.toLowerCase(), current_task: e.task ?? null, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && employees.length) notify("Employee save failed: " + error.message); });
   }, [employees, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
@@ -244,7 +252,7 @@ export default function App() {
     setEmployees(seedEmployees.map((employee) => ({ ...employee })));
     setJobs(makeDemoJobs()); setConversations(makeDemoConversations()); setGoals(makeDemoGoals());
     setSettings({ ...defaultSettings }); setMemberRole("owner");
-    setSelectedEmployee("maya"); setJobEmployee("maya"); setNewEmployeeDept("leadership"); setSelectedChat("demo-group");
+    setSelectedEmployee("maya"); setJobEmployee("maya"); setNewEmployeeDept("leadership"); setNewEmployeeManager(""); setSelectedChat("demo-group");
     setPage("Dashboard"); setMobileContextOpen(false); setAuthError(""); setAuthNotice(""); setToast(""); setSelectedJobId(null);
     setShowJobForm(false); setShowEmployeeForm(false); setShowCompanyForm(false); setShowChatForm(false); setShowGoalForm(false); setShowInviteForm(false);
   };
@@ -312,7 +320,7 @@ export default function App() {
       const messageRows = messageRes.data ?? [];
       const memberRows = memberRes.data ?? [];
       const nextEmployees: Employee[] = employeeRows.map((row: any) => ({
-        id: row.id, name: row.name, role: row.role, deptId: row.department_id ?? "", tone: row.tone,
+        id: row.id, name: row.name, role: row.role, deptId: row.department_id ?? "", managerId: row.manager_id ?? undefined, tone: row.tone,
         model: row.model, instructions: row.custom_instructions, status: row.status === "needs_review" ? "Needs review" : row.status === "working" ? "Working" : row.status === "paused" ? "Paused" : "Available",
         task: row.current_task ?? undefined
       }));
@@ -346,7 +354,7 @@ export default function App() {
       setMemberRole(roleRes.data?.role ?? "member");
       setSelectedEmployee(nextEmployees[0]?.id ?? "");
       setJobEmployee(nextEmployees[0]?.id ?? "");
-      setNewEmployeeDept(departmentRows[0]?.id ?? "");
+      setNewEmployeeDept(departmentRows[0]?.id ?? ""); setNewEmployeeManager("");
       setSelectedChat(conversationRows[0]?.id ?? "");
       setLoadedCompanyId(item.id);
     } catch (error) {
@@ -548,7 +556,52 @@ export default function App() {
       setBusy(false);
     }
   };
-  const runJob = async (jobId: string, feedbackOverride?: string) => {
+  const ensureCollaborationRoom = async (): Promise<Conversation | null> => {
+    const existing = conversations.find((conversation) => conversation.name === "Team collaboration" && conversation.kind === "group");
+    if (existing) {
+      const missingMembers = employees.filter((employee) => employee.status !== "Paused" && !existing.members.includes(employee.id));
+      if (missingMembers.length) {
+        if (!demoMode && company) {
+          const rows = missingMembers.map((employee) => ({ company_id: company.id, conversation_id: existing.id, user_id: null, employee_id: employee.id }));
+          const { error } = await supabase.from("conversation_members").insert(rows);
+          if (error) throw error;
+        }
+        const updated = { ...existing, members: [...existing.members, ...missingMembers.map((employee) => employee.id)] };
+        setConversations((old) => old.map((conversation) => conversation.id === existing.id ? updated : conversation));
+        return updated;
+      }
+      return existing;
+    }
+    if (collaborationRoomRef.current) return collaborationRoomRef.current;
+    const pending = (async () => {
+      if (!company || !user) return null;
+      const id = crypto.randomUUID();
+      const members = employees.filter((employee) => employee.status !== "Paused").map((employee) => employee.id);
+      const room: Conversation = { id, name: "Team collaboration", kind: "group", members, messages: [], createdBy: user.id };
+      if (!demoMode) {
+        const { error } = await supabase.from("conversations").insert({ id, company_id: company.id, name: room.name, kind: "group", created_by: user.id });
+        if (error) throw error;
+        const rows = [{ company_id: company.id, conversation_id: id, user_id: user.id, employee_id: null }, ...members.map((employeeId) => ({ company_id: company.id, conversation_id: id, user_id: null, employee_id: employeeId }))];
+        const { error: membershipError } = await supabase.from("conversation_members").insert(rows);
+        if (membershipError) throw membershipError;
+      }
+      setConversations((old) => old.some((conversation) => conversation.name === room.name && conversation.kind === "group") ? old : [room, ...old]);
+      return room;
+    })();
+    collaborationRoomRef.current = pending;
+    try { return await pending; }
+    finally { collaborationRoomRef.current = null; }
+  };
+  const appendAgentMessages = (room: Conversation, messages: Message[]) => {
+    if (!messages.length) return;
+    setConversations((old) => {
+      const exists = old.some((conversation) => conversation.id === room.id);
+      if (!exists) return [{ ...room, messages: [...room.messages, ...messages] }, ...old];
+      return old.map((conversation) => conversation.id === room.id ? { ...conversation, messages: [...conversation.messages, ...messages] } : conversation);
+    });
+  };
+  const runJob = async (jobId: string, feedbackOverride?: string, options: { background?: boolean } = {}) => {
+    const background = Boolean(options.background);
     if (demoMode) {
       const job = jobs.find((item) => item.id === jobId);
       if (!job || busy) return;
@@ -558,28 +611,140 @@ export default function App() {
       setSelectedJobId(jobId); notify("Demo deliverable created — review the work");
       return;
     }
-    if (!settings.connectors.includes("OpenRouter")) { notify("Enable OpenRouter in Settings before running AI jobs"); return; }
-    if (!openRouterKey.trim()) { notify("Add your OpenRouter API key in Settings → Connectors first."); setPage("Settings"); setActiveSettings("Connectors"); return; }
-    const job = jobs.find((j) => j.id === jobId);
-    if (!job || busy) return;
+    if (!settings.connectors.includes("OpenRouter")) { if (!background) notify("Enable OpenRouter in Settings before running AI jobs"); return; }
+    if (!openRouterKey.trim()) { if (!background) { notify("Add your OpenRouter API key in Settings → Connectors first."); setPage("Settings"); setActiveSettings("Connectors"); } return; }
+    if (!background && autoRunJobLockRef.current) { notify("A background agent is already working on a job."); return; }
+    if (!background && busy) return;
+    const job = jobs.find((item) => item.id === jobId);
+    if (!job) return;
     const emp = employeeMap.get(job.employeeId);
-    if (!emp) { notify("This job has no assigned employee"); return; }
-    setBusy(true);
+    if (!emp) { if (!background) notify("This job has no assigned employee"); return; }
+    if (!background) setBusy(true);
     try {
-      const prompt = "You are " + emp.name + ", " + emp.role + " working on a delegated job in a company workspace. Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\\n\\nJOB: " + job.title + "\\n\\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\\n\\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\\n\\nProduce the actual deliverable for this job, not a plan to do it. Use clear headings and concrete content. Address any previous review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly.";
-      const model = freeModels.some((item) => item.id === emp.model) ? emp.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
-      const output = await requestOpenRouter(model, [{ role: "user", content: prompt }], openRouterKey);
-      if (!output.trim()) throw new Error("The AI provider returned an empty deliverable.");
-      setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Submitted", result: output, submittedAt: new Date().toISOString() } : j));
-      setEmployees((old) => old.map((e) => e.id === emp.id ? { ...e, status: "Needs review", task: job.title } : e));
-      setConversations((old) => old.map((c) => c.kind === "group" ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: emp.id, text: "I’ve completed the deliverable for “" + job.title + "”. Open the job to inspect the actual work before approving it.", time: nowTime(), createdAt: new Date().toISOString(), jobId }] } : c));
-      setSelectedJobId(jobId);
-      notify("Deliverable created — review the work");
+      const modelFor = (employee: Employee) => freeModels.some((item) => item.id === employee.model) ? employee.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
+      const department = departmentPath(emp.deptId);
+      const manager = emp.managerId ? employeeMap.get(emp.managerId) : undefined;
+      const reviewer = manager && manager.status !== "Paused"
+        ? manager
+        : employees.find((candidate) => candidate.id !== emp.id && candidate.status !== "Paused" && candidate.deptId === emp.deptId)
+          ?? employees.find((candidate) => candidate.id !== emp.id && candidate.status !== "Paused");
+      const prompt = "You are " + emp.name + ", " + emp.role + " in " + department + " at " + company?.name + ". Your manager is " + (manager?.name ?? "the company owner") + ". Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\n\nJOB: " + job.title + "\n\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\n\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\n\nProduce the actual deliverable, not a plan to do it. Use clear headings and concrete content. Address review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly.";
+      const draft = (await requestOpenRouter(modelFor(emp), [{ role: "user", content: prompt }], openRouterKey)).trim();
+      if (!draft) throw new Error("The AI provider returned an empty deliverable.");
+      let output = draft;
+      let reviewFeedback = "";
+      if (reviewer) {
+        try {
+          reviewFeedback = (await requestOpenRouter(modelFor(reviewer), [
+            { role: "system", content: "You are " + reviewer.name + ", " + reviewer.role + " and " + (manager?.id === reviewer.id ? "the manager" : "a collaborating colleague") + " of " + emp.name + ". Review the draft against the brief. Give concise, specific feedback: gaps, factual cautions, missing acceptance criteria and concrete improvements. Do not rewrite the entire deliverable and do not invent facts." },
+            { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nDRAFT FROM " + emp.name + ":\n" + draft + "\n\nProvide a useful peer review in under 250 words." }
+          ], openRouterKey)).trim();
+          if (reviewFeedback) {
+            const revised = (await requestOpenRouter(modelFor(emp), [
+              { role: "system", content: "You are " + emp.name + ", " + emp.role + ". Refine your deliverable using the peer review. Keep strong original material, address valid issues, and do not blindly accept unsupported feedback. Produce only the revised final deliverable." },
+              { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nYOUR FIRST DRAFT:\n" + draft + "\n\nREVIEW FROM " + reviewer.name + ":\n" + reviewFeedback + "\n\nPREVIOUS USER FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None") }
+            ], openRouterKey)).trim();
+            if (revised) output = revised;
+          }
+        } catch (reviewError) {
+          // A peer-review failure should not discard an otherwise usable deliverable.
+          reviewFeedback = "";
+          if (!background) notify("The deliverable was generated, but peer review was unavailable: " + describeError(reviewError, "Unknown review error"));
+        }
+      }
+      const submittedAt = new Date().toISOString();
+      setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Submitted", result: output, submittedAt } : item));
+      setEmployees((old) => old.map((employee) => employee.id === emp.id ? { ...employee, status: "Needs review", task: job.title } : employee));
+      if (reviewFeedback && reviewer) {
+        const collaborationMessages: Message[] = [
+          { id: crypto.randomUUID(), from: emp.id, text: "I have prepared a first draft for “" + job.title + "”. " + reviewer.name + ", could you review the gaps and acceptance criteria before I submit it?", time: nowTime(), createdAt: submittedAt, jobId },
+          { id: crypto.randomUUID(), from: reviewer.id, text: "Peer review for “" + job.title + "”:\n\n" + reviewFeedback.slice(0, 1800), time: nowTime(), createdAt: submittedAt, jobId },
+          { id: crypto.randomUUID(), from: emp.id, text: "I considered " + reviewer.name + "’s feedback, revised the deliverable and submitted it for your review.", time: nowTime(), createdAt: submittedAt, jobId }
+        ];
+        try {
+          const room = await ensureCollaborationRoom();
+          if (room) appendAgentMessages(room, collaborationMessages);
+        } catch (roomError) {
+          notify("Deliverable completed; collaboration log could not be saved: " + describeError(roomError, "Unknown error"));
+        }
+      } else {
+        try {
+          const room = await ensureCollaborationRoom();
+          if (room) appendAgentMessages(room, [{ id: crypto.randomUUID(), from: emp.id, text: "I’ve completed the deliverable for “" + job.title + "”. Open the job to inspect the actual work before approving it.", time: nowTime(), createdAt: submittedAt, jobId }]);
+        } catch (roomError) { notify("Deliverable completed; collaboration log could not be saved: " + describeError(roomError, "Unknown error")); }
+      }
+      if (!background) { setSelectedJobId(jobId); notify("Deliverable created and submitted for review"); }
     } catch (error) {
       const reason = describeError(error, "Unknown OpenRouter error");
-      notify("AI job failed: " + reason);
-    } finally { setBusy(false); }
+      if (!background) notify("AI job failed: " + reason);
+      else {
+        setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Queued" } : item));
+        setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Available" } : employee));
+        notify("Background agent could not complete the job; it was returned to the queue: " + reason);
+      }
+    } finally { if (!background) setBusy(false); }
   };
+  useEffect(() => {
+    if (demoMode || !user || !company || loadedCompanyId !== company.id || !settings.autoRun || !openRouterKey.trim() || !settings.connectors.includes("OpenRouter")) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || busy || autoRunJobLockRef.current || teamPulseLockRef.current) return;
+      const nextJob = jobs.filter((job) => job.status === "In progress").sort((a, b) => {
+        const aTime = Date.parse(a.created); const bTime = Date.parse(b.created);
+        return (Number.isNaN(aTime) ? 0 : aTime) - (Number.isNaN(bTime) ? 0 : bTime);
+      })[0];
+      if (nextJob) {
+        autoRunJobLockRef.current = true;
+        try { await runJob(nextJob.id, undefined, { background: true }); }
+        finally { autoRunJobLockRef.current = false; }
+        return;
+      }
+      const activeJobs = jobs.filter((job) => ["Queued", "In progress", "Submitted", "Rejected"].includes(job.status));
+      const activeGoals = goals.filter((goal) => goal.status === "active" || goal.status === "planned");
+      if (!activeJobs.length && !activeGoals.length) return;
+      if (Date.now() - lastTeamPulseRef.current < 10 * 60 * 1000) return;
+      const activeEmployees = employees.filter((employee) => employee.status !== "Paused");
+      if (activeEmployees.length < 2) return;
+      teamPulseLockRef.current = true;
+      lastTeamPulseRef.current = Date.now();
+      try {
+        const room = await ensureCollaborationRoom();
+        if (!room) return;
+        const tickIndex = Math.floor(Date.now() / (10 * 60 * 1000)) % activeEmployees.length;
+        const actor = activeEmployees[tickIndex];
+        const peer = (actor.managerId ? employeeMap.get(actor.managerId) : undefined)
+          ?? activeEmployees.find((employee) => employee.managerId === actor.id)
+          ?? activeEmployees.find((employee) => employee.id !== actor.id);
+        if (!peer || actor.id === peer.id) return;
+        const jobContext = activeJobs.slice(0, 8).map((job) => "- " + job.title + " (" + job.status + ", owner: " + (employeeMap.get(job.employeeId)?.name ?? "unassigned") + "): " + (job.description || "No brief supplied")).join("\n");
+        const goalContext = activeGoals.slice(0, 8).map((goal) => "- " + goal.title + " (" + goal.progress + "%): " + goal.description).join("\n");
+        const priorTeamChat = room.messages.slice(-8).map((message) => (employeeMap.get(message.from)?.name ?? message.from) + ": " + message.text).join("\n");
+        const actorModel = freeModels.some((item) => item.id === actor.model) ? actor.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
+        const peerModel = freeModels.some((item) => item.id === peer.model) ? peer.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
+        const update = (await requestOpenRouter(actorModel, [
+          { role: "system", content: "You are " + actor.name + ", " + actor.role + " at " + company.name + ". You are an autonomous teammate who can coordinate with coworkers. Your manager is " + managerNameFor(actor.managerId) + ". Use only the supplied workspace facts. Identify one useful coordination point, ask " + peer.name + " for input, or return exactly [NO_UPDATE] when nothing new and actionable is needed. Do not invent progress, decisions, metrics, or actions. Keep any message under 120 words; do not repeat previous check-ins." },
+          { role: "user", content: "ACTIVE JOBS:\n" + (jobContext || "No open jobs.") + "\n\nGOALS:\n" + (goalContext || "No active goals.") + "\n\nRECENT TEAM COLLABORATION:\n" + (priorTeamChat || "No previous collaboration messages.") + "\n\nWrite one genuinely useful internal coordination message, or [NO_UPDATE]." }
+        ], openRouterKey)).trim();
+        if (!update || /^\[NO_UPDATE\]$/i.test(update) || /^NO_ACTION$/i.test(update)) return;
+        const reply = (await requestOpenRouter(peerModel, [
+          { role: "system", content: "You are " + peer.name + ", " + peer.role + " collaborating with " + actor.name + ". Respond to the colleague’s internal update with concrete, useful input or a clarifying question. Use only the provided facts. Do not invent progress or claim actions were completed. If no useful response is possible, return exactly [NO_UPDATE]. Keep under 100 words." },
+          { role: "user", content: "ACTIVE JOBS:\n" + (jobContext || "No open jobs.") + "\n\nACTIVE GOALS:\n" + (goalContext || "No active goals.") + "\n\n" + actor.name + " wrote:\n" + update }
+        ], openRouterKey)).trim();
+        const now = new Date().toISOString();
+        const entries: Message[] = [{ id: crypto.randomUUID(), from: actor.id, text: update.slice(0, 2000), time: nowTime(), createdAt: now }];
+        if (reply && !/^\[NO_UPDATE\]$/i.test(reply) && !/^NO_ACTION$/i.test(reply)) entries.push({ id: crypto.randomUUID(), from: peer.id, text: reply.slice(0, 1600), time: nowTime(), createdAt: new Date(Date.now() + 1).toISOString() });
+        appendAgentMessages(room, entries);
+      } catch (error) {
+        notify("Background collaboration could not run: " + describeError(error, "Unknown AI error"));
+      } finally {
+        teamPulseLockRef.current = false;
+      }
+    };
+    const timer = window.setInterval(() => { void tick(); }, 15000);
+    void tick();
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [demoMode, user?.id, company?.id, loadedCompanyId, settings.autoRun, settings.connectors, openRouterKey, jobs, employees, conversations, goals, freeModels, busy]);
+
   const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
   const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress" } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
   const requestRevision = (jobId: string) => { if (!reviewNote.trim()) { notify("Add a note explaining what needs to change"); return; } setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Rejected", reviewNote: reviewNote.trim() } : j)); notify("Revision requested — feedback saved to the job"); };
@@ -616,6 +781,9 @@ export default function App() {
       const employeeRows = seedEmployees.map((employee) => ({ id: employeeIds.get(employee.id), company_id: companyId, department_id: deptIds.get(employee.deptId) ?? null, name: employee.name, role: employee.role, tone: employee.tone, model: employee.model, custom_instructions: employee.instructions, status: "available" }));
       const { error: employeeError } = await supabase.from("employees").insert(employeeRows);
       if (employeeError) throw employeeError;
+      const managerUpdates = await Promise.all(seedEmployees.filter((employee) => employee.managerId).map((employee) => supabase.from("employees").update({ manager_id: employeeIds.get(employee.managerId!) }).eq("id", employeeIds.get(employee.id)).eq("company_id", companyId)));
+      const managerError = managerUpdates.find((result) => result.error)?.error;
+      if (managerError) throw managerError;
       const teamId = crypto.randomUUID();
       const { error: convError } = await supabase.from("conversations").insert({ id: teamId, company_id: companyId, name: "Company team", kind: "group", created_by: authenticatedUser.id });
       if (convError) throw convError;
@@ -664,9 +832,23 @@ export default function App() {
   };
   const createEmployee = (event: FormEvent) => {
     event.preventDefault(); if (!employeeName.trim() || !employeeRole.trim()) return;
+    if (!newEmployeeManager) { notify("Choose a manager or select the top of the hierarchy."); return; }
     const id = crypto.randomUUID();
-    setEmployees((old) => [...old, { id, name: employeeName.trim(), role: employeeRole.trim(), deptId: newEmployeeDept || depts[0]?.id || "leadership", tone: "Clear & concise", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "", status: "Available" }]);
-    setEmployeeName(""); setEmployeeRole(""); setNewEmployeeDept("leadership"); setShowEmployeeForm(false); setSelectedEmployee(id); notify("Employee created");
+    const managerId = newEmployeeManager === "__none__" ? undefined : newEmployeeManager;
+    if (managerId && !employees.some((employee) => employee.id === managerId)) { notify("Choose a valid manager."); return; }
+    const employee: Employee = { id, name: employeeName.trim(), role: employeeRole.trim(), deptId: newEmployeeDept || depts[0]?.id || "", ...(managerId ? { managerId } : {}), tone: "Clear & concise", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "", status: "Available" };
+    setEmployees((old) => [...old, employee]);
+    setEmployeeName(""); setEmployeeRole(""); setNewEmployeeDept(depts[0]?.id ?? "__root__"); setNewEmployeeManager(""); setShowEmployeeForm(false); setSelectedEmployee(id); notify("Employee created and reporting line saved");
+  };
+  const createDepartment = (event: FormEvent) => {
+    event.preventDefault();
+    const name = departmentName.trim();
+    if (!name) return;
+    const parentId = newDepartmentParent === "__root__" ? undefined : newDepartmentParent;
+    if (parentId && !depts.some((department) => department.id === parentId)) { notify("Choose a valid parent department."); return; }
+    if (depts.some((department) => department.name.toLocaleLowerCase() === name.toLocaleLowerCase() && (department.parentId ?? "__root__") === (parentId ?? "__root__"))) { notify("A department with that name already exists at this level."); return; }
+    setDepts((old) => [...old, { id: crypto.randomUUID(), name, parentId }]);
+    setDepartmentName(""); setNewDepartmentParent("__root__"); setShowDepartmentForm(false); notify(parentId ? "Nested department created" : "Department created");
   };
   const createConversation = async (event: FormEvent) => {
     event.preventDefault();
@@ -701,14 +883,21 @@ export default function App() {
     setPage("Communication");
   };
   const employeeNameFor = (id: string) => id === "you" ? "You" : id === "teammate" ? "Teammate" : employeeMap.get(id)?.name ?? "AutoBusiness";
-  const filteredEmployees = employees.filter((e) => (e.name + " " + e.role + " " + (depts.find((d) => d.id === e.deptId)?.name ?? "")).toLowerCase().includes(search.toLowerCase()));
+  const filteredEmployees = employees.filter((e) => (e.name + " " + e.role + " " + (depts.find((d) => d.id === e.deptId)?.name ?? "") + " " + (employeeMap.get(e.managerId ?? "")?.name ?? "")).toLowerCase().includes(search.toLowerCase()));
+  const managerNameFor = (managerId?: string) => managerId ? employeeMap.get(managerId)?.name ?? "Unassigned manager" : "You";
+  const isEmployeeDescendant = (candidateId: string, ancestorId: string) => { let current = employeeMap.get(candidateId); const visited = new Set<string>(); while (current?.managerId && !visited.has(current.id)) { if (current.managerId === ancestorId) return true; visited.add(current.id); current = employeeMap.get(current.managerId); } return false; };
+  const departmentPath = (departmentId?: string) => {
+    if (!departmentId) return "Unassigned";
+    const parts: string[] = []; const seen = new Set<string>(); let current = depts.find((department) => department.id === departmentId);
+    while (current && !seen.has(current.id)) { seen.add(current.id); parts.unshift(current.name); current = current.parentId ? depts.find((department) => department.id === current?.parentId) : undefined; }
+    return parts.join(" / ") || "Unassigned";
+  };
   const departmentTree = (parent?: string, depth = 0): JSX.Element[] => depts.filter((d) => d.parentId === parent).flatMap((d) => {
     const members = filteredEmployees.filter((e) => e.deptId === d.id);
     const children = departmentTree(d.id, depth + 1);
-    if (!members.length && !children.length) return [];
     return [<div className="department" key={d.id}>
-      <div className="department-label" style={{ paddingLeft: 10 + depth * 14 }}><span className="department-dot" />{d.name}<span className="muted-count">{members.length}</span></div>
-      {members.map((e) => <button className={"employee-row " + (selectedEmployee === e.id ? "selected" : "")} key={e.id} onClick={() => { setSelectedEmployee(e.id); setProfileEmployeeId(e.id); setMobileContextOpen(false); }}><span className={"avatar small " + (e.status === "Working" ? "avatar-violet" : "")}>{initials(e.name)}</span><span className="employee-row-copy"><strong>{e.name}</strong><small>{e.role}</small></span><span className={"status-dot " + e.status.toLowerCase().replace(" ", "-")} /></button>)}
+      <div className="department-label" style={{ paddingLeft: 10 + depth * 14 }}><span className="department-dot" />{d.name}<span className="muted-count">{members.length}</span><button type="button" className="tiny-icon dept-add-button" title={"Add subdepartment under " + d.name} aria-label={"Add subdepartment under " + d.name} onClick={(event) => { event.stopPropagation(); setDepartmentName(""); setNewDepartmentParent(d.id); setShowDepartmentForm(true); }}><Plus size={12} /></button></div>
+      {members.map((e) => <button className={"employee-row " + (selectedEmployee === e.id ? "selected" : "")} key={e.id} style={{ marginLeft: e.managerId && members.some((candidate) => candidate.id === e.managerId) ? 14 : 0 }} onClick={() => { setSelectedEmployee(e.id); setProfileEmployeeId(e.id); setMobileContextOpen(false); }}><span className={"avatar small " + (e.status === "Working" ? "avatar-violet" : "")}>{initials(e.name)}</span><span className="employee-row-copy"><strong>{e.name}</strong><small>{e.role} · reports to {managerNameFor(e.managerId)}</small></span><span className={"status-dot " + e.status.toLowerCase().replace(" ", "-")} /></button>)}
       {children}
     </div>];
   });
@@ -772,7 +961,7 @@ export default function App() {
         </> : page === "Management" ? <>
           <div className="side-section-head"><span>YOUR TEAM</span><button className="tiny-icon" onClick={() => setShowEmployeeForm(true)} title="Add employee"><Plus size={15} /></button></div>
           <div className="employee-search"><Search size={14} /><input placeholder="Find an employee" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-          <div className="department-list">{departmentTree()}</div><button className="side-new-button" onClick={() => setShowEmployeeForm(true)}><Plus size={14} /> Add employee</button>
+          <div className="department-list">{departmentTree()}</div><button className="side-new-button" onClick={() => { setDepartmentName(""); setNewDepartmentParent("__root__"); setShowDepartmentForm(true); }}><Plus size={14} /> Add department</button><button className="side-new-button" onClick={() => { setNewEmployeeManager(""); setShowEmployeeForm(true); }}><Plus size={14} /> Add employee</button>
         </> : page === "Settings" ? <>
           <div className="side-section-head"><span>SETTINGS</span></div>
           {[{ label: "General", icon: Settings2 }, { label: "Security", icon: ShieldCheck }, { label: "Rulesets", icon: LockKeyhole }, { label: "Connectors", icon: Workflow }, { label: "Automation & limits", icon: Gauge }].map(({ label, icon: SettingIcon }) => <button key={label} title={label} className={"nav-item subnav " + (activeSettings === label ? "active" : "")} onClick={() => { setActiveSettings(label); setMobileContextOpen(false); }}><SettingIcon size={20} /><span>{label}</span></button>)}
@@ -807,16 +996,16 @@ export default function App() {
           </div>
         </div>}
         {page === "Management" && <div className="page-wrap management-page">
-          <div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> People</div><h1>Management</h1><p>Your organisation, departments and AI employees.</p></div><button className="primary-button" onClick={() => setShowEmployeeForm(true)}><Plus size={16} /> Add employee</button></div>
-          <div className="management-layout"><section className="panel management-tree"><div className="management-tree-head"><div><h2>Organisation</h2><p>{employees.length} employees · {depts.length} departments</p></div></div><div className="org-tree">{departmentTree()}</div>{filteredEmployees.length === 0 && <div className="empty-state">No employees match your search.</div>}</section>
+          <div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> People</div><h1>Management</h1><p>Your organisation, nested departments, reporting lines and AI employees.</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => { setDepartmentName(""); setNewDepartmentParent("__root__"); setShowDepartmentForm(true); }}><Plus size={15} /> Add department</button><button className="primary-button" onClick={() => { setNewEmployeeManager(""); setShowEmployeeForm(true); }}><Plus size={16} /> Add employee</button></div></div>
+          <div className="management-layout"><section className="panel management-tree"><div className="management-tree-head"><div><h2>Organisation</h2><p>{employees.length} employees · {depts.length} departments</p></div><button className="text-button" onClick={() => { setDepartmentName(""); setNewDepartmentParent("__root__"); setShowDepartmentForm(true); }}><Plus size={14} /> Add department</button></div><div className="org-tree">{departmentTree()}</div>{filteredEmployees.length === 0 && <div className="empty-state">No employees match your search.</div>}</section>
           {activeEmployee && <section className="panel employee-detail"><div className="employee-profile-head"><div className="avatar large">{initials(activeEmployee.name)}</div><div className="employee-profile-title"><h2>{activeEmployee.name}</h2><p>{activeEmployee.role}</p><span className={"presence " + activeEmployee.status.toLowerCase().replace(" ", "-")}><i />{activeEmployee.status}</span></div><button className="icon-button subtle" title={activeEmployee.status === "Paused" ? "Resume employee" : "Pause employee"} aria-label={activeEmployee.status === "Paused" ? "Resume employee" : "Pause employee"} onClick={() => { const resume = activeEmployee.status === "Paused"; setEmployees((old) => old.map((employee) => employee.id === activeEmployee.id ? { ...employee, status: resume ? (employee.task ? "Working" : "Available") : "Paused" } : employee)); notify(resume ? activeEmployee.name + " resumed" : activeEmployee.name + " paused"); }}><MoreHorizontal size={18} /></button></div>
             <button className="primary-button full-button" onClick={() => openChatWith(activeEmployee.id)}><MessageCircle size={16} /> Open conversation</button>
             
-            <div className="detail-divider" /><div className="detail-section-title">CURRENT STATUS</div><div className="status-summary"><span className={"status-pulse " + activeEmployee.status.toLowerCase().replace(" ", "-")} /><div><strong>{activeEmployee.status}</strong><small>{activeEmployee.task ? "Currently focused on " + activeEmployee.task : "No active task assigned"}</small></div></div>
+            <div className="detail-divider" /><div className="detail-section-title">REPORTING LINE</div><div className="reporting-summary"><span className="reporting-label">Manager</span><strong>{managerNameFor(activeEmployee.managerId)}</strong></div>{employees.filter((employee) => employee.managerId === activeEmployee.id).length > 0 && <div className="reporting-summary"><span className="reporting-label">Direct reports</span><div className="reporting-people">{employees.filter((employee) => employee.managerId === activeEmployee.id).map((employee) => <button key={employee.id} onClick={() => { setSelectedEmployee(employee.id); setProfileEmployeeId(employee.id); }}><span className="avatar tiny">{initials(employee.name)}</span><span><strong>{employee.name}</strong><small>{employee.role}</small></span></button>)}</div></div>}<div className="detail-section-title">CURRENT STATUS</div><div className="status-summary"><span className={"status-pulse " + activeEmployee.status.toLowerCase().replace(" ", "-")} /><div><strong>{activeEmployee.status}</strong><small>{activeEmployee.task ? "Currently focused on " + activeEmployee.task : "No active task assigned"}</small></div></div>
             <div className="detail-section-title">QUEUED JOBS</div>
             {jobs.filter((job) => job.employeeId === activeEmployee.id && ["Queued", "In progress", "Submitted"].includes(job.status)).map((job) => <div className="employee-job-mini" key={job.id}><span className="employee-job-copy"><strong>{job.title}</strong><small>{new Date(job.created).toLocaleString()}</small></span><span className={"job-status " + job.status.toLowerCase().replace(" ", "-")}>{job.status}</span></div>)}
             {!jobs.some((job) => job.employeeId === activeEmployee.id && ["Queued", "In progress", "Submitted"].includes(job.status)) && <p className="no-open-jobs">No open jobs assigned.</p>}
-            <div className="detail-section-title">AI CONFIGURATION</div><label className="field-label">Department<select value={activeEmployee.deptId} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, deptId: e.target.value } : x))}>{depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+            <div className="detail-section-title">AI CONFIGURATION</div><label className="field-label">Department<select value={activeEmployee.deptId} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, deptId: e.target.value } : x))}>{depts.map((d) => <option key={d.id} value={d.id}>{departmentPath(d.id)}</option>)}</select></label><label className="field-label">Reports to<select value={activeEmployee.managerId ?? "__none__"} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, managerId: e.target.value === "__none__" ? undefined : e.target.value } : x))}><option value="__none__">You · top of hierarchy</option>{employees.filter((person) => person.id !== activeEmployee.id && !isEmployeeDescendant(person.id, activeEmployee.id)).map((person) => <option key={person.id} value={person.id}>{person.name} — {person.role}</option>)}</select></label>
             <label className="field-label">Communication tone<select value={activeEmployee.tone} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, tone: e.target.value } : x))}><option>Clear & concise</option><option>Thoughtful & creative</option><option>Warm & articulate</option><option>Analytical</option><option>Practical & direct</option><option>Curious & collaborative</option><option>Formal</option><option>Friendly</option></select></label>
             <label className="field-label">AI model<select value={freeModels.some((item) => item.id === activeEmployee.model) ? activeEmployee.model : freeModels[0]?.id ?? fallbackFreeModels[0].id} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, model: e.target.value } : x))}>{freeModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select><small className="input-help">{modelsLoading ? "Loading current free model catalogue…" : "Only models with zero prompt and completion pricing are listed."}</small></label>
             <label className="field-label">Custom instructions<textarea rows={4} value={activeEmployee.instructions} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, instructions: e.target.value } : x))} placeholder="How should this employee work?" /></label>
@@ -827,7 +1016,7 @@ export default function App() {
         {page === "Communication" && <div className="chat-page">
           <div className="chat-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> Communication</div><h1>Communication</h1><p>Talk to your team and coordinate work in one place.</p></div><button className="primary-button" onClick={() => setShowChatForm(true)}><Plus size={16} /> New conversation</button></div>
           <div className="chat-window panel"><div className="chat-main-head">{activeConversation && <><span className={"chat-avatar " + (activeConversation.kind === "group" ? "team-avatar" : "")}>{activeConversation.kind === "group" ? <Users size={17} /> : initials(activeConversation.name)}</span><div><strong>{activeConversation.name}</strong><small>{activeConversation.kind === "group" ? activeConversation.members.length + " team members" : "Private conversation"}</small></div></>}<button className={"icon-button subtle " + (showChatDetails ? "active" : "")} title="Conversation details and team directory" onClick={() => setShowChatDetails((open) => !open)}><MoreHorizontal size={18} /></button></div>
-            {showChatDetails && <aside className="chat-details-panel"><div className="chat-details-title"><div><strong>People</strong><small>{employees.length} employees</small></div><button className="tiny-icon" onClick={() => setShowChatDetails(false)} aria-label="Close people panel">×</button></div><label className="employee-search"><Search size={14} /><input placeholder="Find a person" value={search} onChange={(e) => setSearch(e.target.value)} /></label>{employees.filter((e) => (e.name + " " + e.role).toLowerCase().includes(search.toLowerCase())).map((e) => <button className="chat-detail-person" key={e.id} onClick={() => { setProfileEmployeeId(e.id); setShowChatDetails(false); }}><span className="avatar small">{initials(e.name)}</span><span><strong>{e.name}</strong><small>{e.role}</small></span><ChevronRight size={15} /></button>)}</aside>}
+            {showChatDetails && <aside className="chat-details-panel"><div className="chat-details-title"><div><strong>People in this chat</strong><small>{activeConversation?.members.length ?? 0} employees</small></div><button className="tiny-icon" onClick={() => setShowChatDetails(false)} aria-label="Close people panel">×</button></div>{activeConversation?.members.length ? activeConversation.members.map((memberId) => employeeMap.get(memberId)).filter((e): e is Employee => Boolean(e) && (e!.name + " " + e!.role).toLowerCase().includes(search.toLowerCase())).map((e) => <button className="chat-detail-person" key={e.id} onClick={() => { setProfileEmployeeId(e.id); setShowChatDetails(false); }}><span className="avatar small">{initials(e.name)}</span><span><strong>{e.name}</strong><small>{e.role} · reports to {managerNameFor(e.managerId)}</small></span><ChevronRight size={15} /></button>) : <p className="chat-details-empty">No employees are in this conversation.</p>}</aside>}
             <div className="message-stream">{activeConversation?.messages.map((m) => <div key={m.id} className={"message-row " + (m.from === "you" ? "mine" : "")}><span className="avatar tiny">{initials(employeeNameFor(m.from))}</span><div className="message-content"><div className="message-meta"><strong>{employeeNameFor(m.from)}</strong><span>{m.time}</span></div><div className="message-bubble">{m.text}</div>{m.jobId && <button className="message-job-link" onClick={() => { changePage("Jobs & approvals"); setSelectedJobId(m.jobId ?? null); }}><Inbox size={13} /> View job and deliverable</button>}</div></div>)}
               {busy && <div className="typing-indicator"><span /><span /><span /> {activeConversation?.name} is thinking…</div>}
               {!activeConversation?.messages.length && <div className="chat-empty"><span className="chat-empty-icon"><MessageCircle size={22} /></span><strong>Start the conversation</strong><p>Send a message. Employees decide whether to reply or open and complete assignments themselves.</p></div>}
@@ -858,16 +1047,17 @@ export default function App() {
               </div>
             </div></>}
             <div className="connector-row"><span className="connector-icon"><Zap size={17} /></span><div><strong>Supabase</strong><small>{demoMode ? "Cloud storage is bypassed in this session." : "Database and authentication for this workspace."}</small></div>{demoMode ? <span className="setting-pill">Demo only</span> : <button className="connector-action enabled" disabled><Check size={13} /> Connected</button>}</div>
-          </>}{activeSettings === "Automation & limits" && <><h2>Automation & usage limits</h2><p className="settings-intro">Control the approval gate and how many assignments can be created.</p><div className="setting-toggle-row"><div><strong>Require approval before jobs start</strong><small>{settings.approvalRequired ? "New assignments wait in the queue until you start them." : "New assignments can start immediately, but AI generation still requires an explicit action. No background worker runs."}</small></div><button className={"toggle " + (settings.approvalRequired ? "on" : "")} role="switch" aria-checked={settings.approvalRequired} aria-label="Require approval before jobs start" onClick={() => setSettings((old) => { const approvalRequired = !old.approvalRequired; return { ...old, approvalRequired, autoRun: !approvalRequired }; })}><span /></button></div><label className="field-label">Daily job creation limit<input type="number" min="1" max="10000" value={settings.dailyLimit} onChange={(e) => setSettings({ ...settings, dailyLimit: Math.max(1, Number(e.target.value)) })} /></label><label className="field-label">Monthly job creation limit<input type="number" min="1" max="100000" value={settings.monthlyLimit} onChange={(e) => setSettings({ ...settings, monthlyLimit: Math.max(1, Number(e.target.value)) })} /></label><div className="usage-summary"><div className="usage-summary-top"><span>Deliverables with results</span><strong>{jobs.filter((j) => Boolean(j.result?.trim())).length} / {jobs.length}</strong></div><div className="usage-track"><span style={{ width: (jobs.length ? jobs.filter((j) => Boolean(j.result?.trim())).length / jobs.length * 100 : 0) + "%" }} /></div></div><p className="small-disclaimer">Provider token usage and billing are not exposed by the current browser AI integration. These figures count saved deliverables, not billable tokens.</p></>}
+          </>}{activeSettings === "Automation & limits" && <><h2>Automation & usage limits</h2><p className="settings-intro">Control autonomous work, the approval gate and usage limits. Background agents run while this workspace is open and connected.</p><div className="setting-toggle-row"><div><strong>Always-on team collaboration</strong><small>{demoMode ? "Demo mode does not make external AI calls." : !settings.autoRun ? "Agents are paused. Turn this on to run eligible jobs and coordinate around active work." : !openRouterKey.trim() ? "Enabled, but waiting for an OpenRouter API key in Settings → Connectors." : !settings.connectors.includes("OpenRouter") ? "Enabled, but OpenRouter is disabled in Connectors." : "Agents are monitoring in-progress jobs and periodically coordinating in the Team collaboration chat."}</small></div><button className={"toggle " + (settings.autoRun ? "on" : "")} role="switch" aria-checked={settings.autoRun} aria-label="Always-on team collaboration" onClick={() => setSettings((old) => ({ ...old, autoRun: !old.autoRun }))}><span /></button></div><div className="setting-toggle-row"><div><strong>Require approval before jobs start</strong><small>{settings.approvalRequired ? "New assignments wait in the queue until you start them. Running jobs can still receive background assistance." : "New assignments start immediately and are picked up by the background team when a provider is configured."}</small></div><button className={"toggle " + (settings.approvalRequired ? "on" : "")} role="switch" aria-checked={settings.approvalRequired} aria-label="Require approval before jobs start" onClick={() => setSettings((old) => ({ ...old, approvalRequired: !old.approvalRequired }))}><span /></button></div><label className="field-label">Daily job creation limit<input type="number" min="1" max="10000" value={settings.dailyLimit} onChange={(e) => setSettings({ ...settings, dailyLimit: Math.max(1, Number(e.target.value)) })} /></label><label className="field-label">Monthly job creation limit<input type="number" min="1" max="100000" value={settings.monthlyLimit} onChange={(e) => setSettings({ ...settings, monthlyLimit: Math.max(1, Number(e.target.value)) })} /></label><div className="usage-summary"><div className="usage-summary-top"><span>Deliverables with results</span><strong>{jobs.filter((j) => Boolean(j.result?.trim())).length} / {jobs.length}</strong></div><div className="usage-track"><span style={{ width: (jobs.length ? jobs.filter((j) => Boolean(j.result?.trim())).length / jobs.length * 100 : 0) + "%" }} /></div></div><p className="small-disclaimer">Provider token usage and billing are not exposed by the current browser AI integration. These figures count saved deliverables, not billable tokens.</p></>}
         </section></div></div>}
       </main>
     </div>
     {mobileContextOpen && <button type="button" className="sidebar-scrim" aria-label="Close contextual navigation" onClick={() => setMobileContextOpen(false)} />}
     {toast && <div className="toast"><Check size={15} />{toast}</div>}
-    {showHelp && <div className="modal-backdrop" onClick={() => setShowHelp(false)}><section className="modal help-modal" role="dialog" aria-modal="true" aria-labelledby="help-modal-title" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setShowHelp(false)} aria-label="Close help">×</button><span className="modal-kicker"><CircleHelp size={14} /> QUICK GUIDE</span><h2 id="help-modal-title">How AutoBusiness works</h2><div className="help-step"><strong>1. Talk to your team</strong><p>Private and group conversations share relevant workspace chat and assignment context with participating employees.</p></div><div className="help-step"><strong>2. Delegate meaningful work</strong><p>Employees can choose to reply or open an assignment. New assignments appear in Jobs & approvals.</p></div><div className="help-step"><strong>3. Review before approving</strong><p>Open submitted work, request a revision with feedback, or approve it to complete the job.</p></div><div className="help-step"><strong>4. Configure access carefully</strong><p>Provider keys are browser-local in this static deployment. External publishing, connector writes and background automation are not enabled by this demo.</p></div><div className="work-modal-actions"><button className="primary-button" onClick={() => setShowHelp(false)}>Got it</button><button className="secondary-button" onClick={() => { setShowHelp(false); changePage("Settings"); }}>Open settings</button></div></section></div>}
-    {profileEmployeeId && (() => { const person = employeeMap.get(profileEmployeeId); if (!person) return null; return <div className="modal-backdrop" onClick={() => setProfileEmployeeId(null)}><section className="modal employee-quick-profile" role="dialog" aria-modal="true" aria-labelledby="quick-profile-title" onClick={(e) => e.stopPropagation()}><button type="button" className="modal-close" onClick={() => setProfileEmployeeId(null)} aria-label="Close employee profile">×</button><div className="employee-profile-head"><div className="avatar large">{initials(person.name)}</div><div className="employee-profile-title"><h2 id="quick-profile-title">{person.name}</h2><p>{person.role}</p><span className={"presence " + person.status.toLowerCase().replace(" ", "-")}><i />{person.status}</span></div></div><div className="detail-divider" /><div className="detail-section-title">DEPARTMENT</div><p className="profile-value">{depts.find((d) => d.id === person.deptId)?.name ?? "Unassigned"}</p><div className="detail-section-title">CURRENT WORK</div><p className="profile-value">{person.task || "No active task"}</p><div className="detail-section-title">OPEN JOBS</div>{jobs.filter((j) => j.employeeId === person.id && ["Queued", "In progress", "Submitted"].includes(j.status)).map((j) => <div className="employee-job-mini" key={j.id}><span className="employee-job-copy"><strong>{j.title}</strong><small>{j.status}</small></span></div>)}{!jobs.some((j) => j.employeeId === person.id && ["Queued", "In progress", "Submitted"].includes(j.status)) && <p className="profile-value">No open jobs.</p>}<div className="work-modal-actions"><button className="secondary-button" onClick={() => setProfileEmployeeId(null)}>Close</button><button className="primary-button" onClick={() => { setProfileEmployeeId(null); setSelectedEmployee(person.id); setPage("Management"); }}><Users size={14} /> Open full profile</button><button className="secondary-button" onClick={() => { setProfileEmployeeId(null); setPage("Communication"); setMobileContextOpen(false); void openChatWith(person.id); }}>Open chat</button></div></section></div>; })()}
+    {showHelp && <div className="modal-backdrop" onClick={() => setShowHelp(false)}><section className="modal help-modal" role="dialog" aria-modal="true" aria-labelledby="help-modal-title" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setShowHelp(false)} aria-label="Close help">×</button><span className="modal-kicker"><CircleHelp size={14} /> QUICK GUIDE</span><h2 id="help-modal-title">How AutoBusiness works</h2><div className="help-step"><strong>1. Talk to your team</strong><p>Private and group conversations share relevant workspace chat and assignment context with participating employees.</p></div><div className="help-step"><strong>2. Delegate meaningful work</strong><p>Employees can choose to reply or open an assignment. New assignments appear in Jobs & approvals.</p></div><div className="help-step"><strong>3. Review before approving</strong><p>Open submitted work, request a revision with feedback, or approve it to complete the job.</p></div><div className="help-step"><strong>4. Configure access carefully</strong><p>Provider keys are stored in this browser. Autonomous agents require an OpenRouter key and run while the authenticated workspace remains open; they pause when the page is closed. True server-side 24/7 operation needs a separately deployed background worker.</p></div><div className="work-modal-actions"><button className="primary-button" onClick={() => setShowHelp(false)}>Got it</button><button className="secondary-button" onClick={() => { setShowHelp(false); changePage("Settings"); }}>Open settings</button></div></section></div>}
+    {profileEmployeeId && (() => { const person = employeeMap.get(profileEmployeeId); if (!person) return null; return <div className="modal-backdrop" onClick={() => setProfileEmployeeId(null)}><section className="modal employee-quick-profile" role="dialog" aria-modal="true" aria-labelledby="quick-profile-title" onClick={(e) => e.stopPropagation()}><button type="button" className="modal-close" onClick={() => setProfileEmployeeId(null)} aria-label="Close employee profile">×</button><div className="employee-profile-head"><div className="avatar large">{initials(person.name)}</div><div className="employee-profile-title"><h2 id="quick-profile-title">{person.name}</h2><p>{person.role}</p><span className={"presence " + person.status.toLowerCase().replace(" ", "-")}><i />{person.status}</span></div></div><div className="detail-divider" /><div className="detail-section-title">DEPARTMENT</div><p className="profile-value">{departmentPath(person.deptId)}</p><div className="detail-section-title">REPORTING LINE</div><p className="profile-value">Reports to {managerNameFor(person.managerId)}</p>{employees.filter((employee) => employee.managerId === person.id).length > 0 && <><div className="detail-section-title">DIRECT REPORTS</div>{employees.filter((employee) => employee.managerId === person.id).map((employee) => <button className="profile-report-row" key={employee.id} onClick={() => setProfileEmployeeId(employee.id)}><span className="avatar tiny">{initials(employee.name)}</span><span><strong>{employee.name}</strong><small>{employee.role}</small></span><ChevronRight size={14} /></button>)}</>}<div className="detail-section-title">CURRENT WORK</div><p className="profile-value">{person.task || "No active task"}</p><div className="detail-section-title">OPEN JOBS</div>{jobs.filter((j) => j.employeeId === person.id && ["Queued", "In progress", "Submitted"].includes(j.status)).map((j) => <div className="employee-job-mini" key={j.id}><span className="employee-job-copy"><strong>{j.title}</strong><small>{j.status}</small></span></div>)}{!jobs.some((j) => j.employeeId === person.id && ["Queued", "In progress", "Submitted"].includes(j.status)) && <p className="profile-value">No open jobs.</p>}<div className="work-modal-actions"><button className="secondary-button" onClick={() => setProfileEmployeeId(null)}>Close</button><button className="primary-button" onClick={() => { setProfileEmployeeId(null); setSelectedEmployee(person.id); setPage("Management"); }}><Users size={14} /> Open full profile</button><button className="secondary-button" onClick={() => { setProfileEmployeeId(null); setPage("Communication"); setMobileContextOpen(false); void openChatWith(person.id); }}>Open chat</button></div></section></div>; })()}
     {selectedJobId && (() => { const j = jobs.find((item) => item.id === selectedJobId); if (!j) return null; const emp = employeeMap.get(j.employeeId); return <div className="modal-backdrop" onClick={() => setSelectedJobId(null)}><section className="modal work-modal" role="dialog" aria-modal="true" aria-labelledby="work-modal-title" onClick={(e) => e.stopPropagation()}><button type="button" className="modal-close" onClick={() => setSelectedJobId(null)} aria-label="Close work review">×</button><span className="modal-kicker"><Inbox size={14} /> DELIVERABLE REVIEW</span><h2 id="work-modal-title">{j.title}</h2><p>Assigned to {emp?.name ?? "Unassigned"} · {j.status} · {j.priority}{j.submittedAt ? " · Submitted " + new Date(j.submittedAt).toLocaleString() : ""}</p>{j.description && <div className="work-job-brief"><strong>Job brief</strong><p>{j.description}</p></div>}{j.status === "Rejected" && j.reviewNote && <div className="review-feedback"><strong>Requested changes</strong><p>{j.reviewNote}</p></div>}<div className="work-result">{j.result?.trim() || "No deliverable has been generated yet. Start the job and generate work before reviewing or approving it."}</div>{j.status === "Submitted" && <label className="review-note-field">Revision feedback (required to send back)<textarea rows={3} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Explain what needs to change, with specific, actionable feedback." /></label>}{j.status === "Rejected" && <label className="review-note-field">Update revision feedback<textarea rows={3} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="What should the employee change?" /></label>}<div className="work-modal-actions"><button className="secondary-button" onClick={() => setSelectedJobId(null)}>Close</button>{j.status === "In progress" && <button className="primary-button" disabled={busy} onClick={() => void runJob(j.id)}>{busy ? "Generating…" : "Generate work"}</button>}{j.status === "Rejected" && <button className="primary-button" disabled={busy} onClick={() => { setJobs((old) => old.map((x) => x.id === j.id ? { ...x, status: "In progress", reviewNote: reviewNote.trim() || x.reviewNote } : x)); void runJob(j.id, reviewNote.trim() || j.reviewNote); }}>{busy ? "Generating…" : "Regenerate work"}</button>}{j.status === "Submitted" && <><button className="secondary-button" onClick={() => requestRevision(j.id)}>Request revision</button><button className="primary-button" disabled={!j.result?.trim()} onClick={() => { if (j.result?.trim()) { approveJob(j.id); setSelectedJobId(null); } }}><Check size={14} /> Approve reviewed work</button></>}</div></section></div>; })()}\n    {showJobForm && <div className="modal-backdrop" onClick={() => setShowJobForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createJob}><button type="button" className="modal-close" onClick={() => setShowJobForm(false)}>×</button><span className="modal-kicker"><Inbox size={14} /> JOB ASSIGNMENT</span><h2>Assign a job</h2><p>Give an employee a clear outcome to work towards.</p><label>Job title<input autoFocus value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} placeholder="e.g. Draft a launch plan" minLength={2} maxLength={240} required /></label><label>Job brief / acceptance criteria<textarea rows={4} value={jobDescription} onChange={(e) => setJobDescription(e.target.value)} maxLength={8000} placeholder="Describe the expected deliverable, audience, constraints, and what a successful result includes." /></label><label>Priority<select value={jobPriority} onChange={(e) => setJobPriority(e.target.value as "Normal" | "Urgent")}><option>Normal</option><option>Urgent</option></select></label><label>Assign to<select value={jobEmployee} onChange={(e) => setJobEmployee(e.target.value)}>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}</select></label><div className="modal-note"><ShieldCheck size={15} />{settings.approvalRequired ? "This job will be queued for approval before it can start." : "This job will start without the approval gate; AI generation still requires a manual action."}</div><button className="primary-button modal-submit" type="submit">Create job <ArrowUpRight size={15} /></button></form></div>}
-    {showEmployeeForm && <div className="modal-backdrop" onClick={() => setShowEmployeeForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createEmployee}><button type="button" className="modal-close" onClick={() => setShowEmployeeForm(false)}>×</button><span className="modal-kicker"><Users size={14} /> TEAM SETUP</span><h2>Add an employee</h2><p>Create a new AI teammate for this workspace.</p><label>Full name<input autoFocus value={employeeName} onChange={(e) => setEmployeeName(e.target.value)} placeholder="e.g. Sam Taylor" required /></label><label>Role<input value={employeeRole} onChange={(e) => setEmployeeRole(e.target.value)} placeholder="e.g. Research analyst" required /></label><label>Department<select value={newEmployeeDept} onChange={(e) => setNewEmployeeDept(e.target.value)}>{depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label><button className="primary-button modal-submit" type="submit">Create employee <Plus size={15} /></button></form></div>}
+    {showEmployeeForm && <div className="modal-backdrop" onClick={() => setShowEmployeeForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createEmployee}><button type="button" className="modal-close" onClick={() => setShowEmployeeForm(false)}>×</button><span className="modal-kicker"><Users size={14} /> TEAM SETUP</span><h2>Add an employee</h2><p>Create a new AI teammate for this workspace.</p><label>Full name<input autoFocus value={employeeName} onChange={(e) => setEmployeeName(e.target.value)} placeholder="e.g. Sam Taylor" required /></label><label>Role<input value={employeeRole} onChange={(e) => setEmployeeRole(e.target.value)} placeholder="e.g. Research analyst" required /></label><label>Department<select value={newEmployeeDept} onChange={(e) => setNewEmployeeDept(e.target.value)} required><option value="__root__" disabled>Select a department</option>{depts.map((d) => <option key={d.id} value={d.id}>{departmentPath(d.id)}</option>)}</select></label><label>Reports to<select value={newEmployeeManager} onChange={(e) => setNewEmployeeManager(e.target.value)} required><option value="" disabled>Choose a manager</option><option value="__none__">You · top of hierarchy</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} — {employee.role}</option>)}</select><small className="input-help">This determines their manager and reporting line.</small></label><button className="primary-button modal-submit" type="submit">Create employee <Plus size={15} /></button></form></div>}
+    {showDepartmentForm && <div className="modal-backdrop" onClick={() => setShowDepartmentForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createDepartment}><button type="button" className="modal-close" onClick={() => setShowDepartmentForm(false)} aria-label="Close department form">×</button><span className="modal-kicker"><Building2 size={14} /> ORGANISATION DESIGN</span><h2>Add a department</h2><p>Create a top-level department or place it under another department to build any number of nested levels.</p><label>Department name<input autoFocus value={departmentName} onChange={(e) => setDepartmentName(e.target.value)} placeholder="e.g. Research" minLength={1} maxLength={100} required /></label><label>Parent department<select value={newDepartmentParent} onChange={(e) => setNewDepartmentParent(e.target.value)}><option value="__root__">No parent · top-level department</option>{depts.map((department) => <option key={department.id} value={department.id}>{departmentPath(department.id)}</option>)}</select></label><button className="primary-button modal-submit" type="submit">Create department <Plus size={15} /></button></form></div>}
     {showInviteForm && <div className="modal-backdrop" onClick={() => setShowInviteForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createInvite}><button type="button" className="modal-close" onClick={() => setShowInviteForm(false)} aria-label="Close invitation form">×</button><span className="modal-kicker"><Users size={14} /> TEAM ACCESS</span><h2>Invite a teammate</h2><p>Only the invited email address can redeem this link. It expires after seven days.</p><label>Email address<input autoFocus type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="teammate@company.com" required disabled={Boolean(inviteUrl)} /></label><label>Workspace role<select value={inviteRole} onChange={(e) => setInviteRole(e.target.value as "admin" | "member")} disabled={Boolean(inviteUrl)}><option value="member">Member — collaborate on work</option><option value="admin">Admin — manage workspace settings</option></select></label>{inviteUrl && <div className="invite-link-result"><strong>Invitation link ready</strong><p>Send this link to the invited person. They must sign in with the exact email address above.</p><input aria-label="Invitation link" readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} /><button type="button" className="secondary-button" onClick={() => { void navigator.clipboard.writeText(inviteUrl).then(() => notify("Invitation link copied")).catch(() => notify("Select the invitation link and copy it manually")); }}>Copy invitation link</button><button type="button" className="text-button" onClick={() => { setInviteUrl(""); setInviteEmail(""); }}>Create another invitation</button></div>}<div className="work-modal-actions"><button type="button" className="secondary-button" onClick={() => setShowInviteForm(false)}>Close</button>{!inviteUrl && <button className="primary-button" type="submit" disabled={inviteBusy}>{inviteBusy ? "Creating link…" : "Create invitation link"}</button>}</div></form></div>}
     {showGoalForm && <div className="modal-backdrop" onClick={() => setShowGoalForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createGoal}><button type="button" className="modal-close" onClick={() => setShowGoalForm(false)} aria-label="Close goal form">×</button><span className="modal-kicker"><Activity size={14} /> GOAL TRACKING</span><h2>Create a goal</h2><p>Set a measurable outcome for this company.</p><label>Goal title<input autoFocus value={goalTitle} onChange={(e) => setGoalTitle(e.target.value)} placeholder="e.g. Improve onboarding completion" minLength={2} maxLength={180} required /></label><label>Description<textarea rows={3} value={goalDescription} onChange={(e) => setGoalDescription(e.target.value)} maxLength={4000} placeholder="Describe the outcome and how you will measure it." /></label><label>Due date<input type="date" value={goalDueDate} onChange={(e) => setGoalDueDate(e.target.value)} /></label><button className="primary-button modal-submit" type="submit">Create goal <Plus size={15} /></button></form></div>}
     {showChatForm && <div className="modal-backdrop" onClick={() => setShowChatForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createConversation}><button type="button" className="modal-close" onClick={() => setShowChatForm(false)}>×</button><span className="modal-kicker"><MessageCircle size={14} /> COMMUNICATION</span><h2>New conversation</h2><p>Start a private chat or bring a few employees together.</p><label>Conversation name<input autoFocus value={newChatName} onChange={(e) => setNewChatName(e.target.value)} placeholder="e.g. Website launch" required /></label><label>Invite employees<select multiple value={newChatMembers} onChange={(e) => setNewChatMembers(Array.from(e.target.selectedOptions, (o) => o.value))}>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}</select><small className="input-help">Choose one employee for a private chat, or several for a group.</small></label><button className="primary-button modal-submit" type="submit">Create conversation <ArrowUpRight size={15} /></button></form></div>}
