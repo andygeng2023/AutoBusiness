@@ -131,6 +131,21 @@ create trigger departments_validate_parent_link
 before insert or update on public.departments
 for each row execute function public.validate_department_parent_link();
 
+-- Populate the reporting lines for the original starter-team templates in
+-- existing workspaces. Custom employees and other names remain unassigned.
+update public.employees employee
+set manager_id = manager.id
+from public.employees manager
+where employee.company_id = manager.company_id
+  and employee.manager_id is null
+  and (
+    (employee.name = 'Leo Martin' and manager.name = 'Maya Chen')
+    or (employee.name = 'Amara Okafor' and manager.name = 'Leo Martin')
+    or (employee.name = 'Noah Williams' and manager.name = 'Maya Chen')
+    or (employee.name = 'Ella Rossi' and manager.name = 'Maya Chen')
+    or (employee.name = 'Jules Park' and manager.name = 'Leo Martin')
+  );
+
 -- Autonomous collaboration is opt-out, but still requires an OpenRouter key
 -- and an open authenticated workspace in the current static client.
 alter table public.workspace_settings
