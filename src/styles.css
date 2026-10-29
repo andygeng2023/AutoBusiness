@@ -19,3 +19,43 @@
 
 /* Supabase authentication and cloud workspace states */
 .auth-content{max-width:520px;margin:0 auto;padding:64px 24px 56px}.auth-card{background:#fff;border:1px solid #e8e9f1;border-radius:18px;padding:34px;box-shadow:0 12px 40px #29264a0a}.auth-card h1{font-family:Manrope,sans-serif;font-size:34px;line-height:1.15;letter-spacing:-1.3px;margin:18px 0 10px}.auth-card .home-subtitle{line-height:1.65;margin-bottom:26px}.auth-form{display:flex;flex-direction:column;gap:16px}.auth-form label{display:flex;flex-direction:column;gap:7px;color:#4d4e63;font-size:12px;font-weight:600}.auth-form input{width:100%;border:1px solid #e1e2ec;border-radius:9px;padding:12px 13px;color:#292a3e;background:#fff;font-size:14px;font-weight:400}.auth-submit{width:100%;justify-content:center;margin-top:4px}.auth-error,.auth-notice{font-size:12px;line-height:1.55;margin:0;padding:10px 12px;border-radius:8px}.auth-error{color:#a23b3b;background:#fff0ef;border:1px solid #f3d0cd}.auth-notice{color:#176e50;background:#eaf8f1;border:1px solid #cbeedd}.auth-switch{text-align:center;font-size:12px;color:#77798b;margin:20px 0 0}.auth-switch button,.auth-signout-link{border:0;background:transparent;color:#6558d9;font-weight:700;padding:3px 4px}.auth-security-note{display:flex;align-items:flex-start;gap:8px;border-top:1px solid #f0f0f5;padding-top:16px;margin-top:22px;color:#85879a;font-size:11px;line-height:1.6}.auth-security-note svg{flex:0 0 auto;margin-top:1px}.auth-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}.auth-loading p{color:#77798b;font-size:13px}.auth-signout-link{display:block;margin:16px auto 0;font-size:12px}.company-empty{grid-column:1/-1;text-align:center;padding:22px;border:1px dashed #dedfea;border-radius:14px;background:#ffffff80}.company-empty strong{color:#38394e}.company-empty p{margin:7px 0 0;color:#85879a;font-size:12px}.goal-progress-input{width:100%;margin:9px 0 0;accent-color:#6558d9;height:15px}.goals-panel .goal-item{padding-bottom:10px}.goals-panel .empty-state{padding:22px 8px}.goals-panel .empty-state p{margin:6px 0 0;color:#85879a;font-size:12px}.profile-button{border:0}.auth-loading .brand{margin-bottom:4px}@media(max-width:600px){.auth-content{padding:36px 16px}.auth-card{padding:24px 20px}.auth-card h1{font-size:29px}.company-grid{grid-template-columns:1fr}.company-card{min-height:180px}}
+
+
+/* Dual, hover-expanding navigation rails */
+@media (min-width: 761px) {
+  .app-body { display:flex; align-items:stretch; }
+  .sidebar.primary-sidebar {
+    width:58px; flex:0 0 58px; padding:20px 8px 12px; overflow-x:hidden;
+    transition:width .18s ease, flex-basis .18s ease; z-index:32;
+  }
+  .sidebar.primary-sidebar:hover, .sidebar.primary-sidebar:focus-within {
+    width:218px; flex-basis:218px;
+  }
+  .primary-sidebar .workspace-label { white-space:nowrap; opacity:0; height:8px; overflow:hidden; }
+  .primary-sidebar:hover .workspace-label, .primary-sidebar:focus-within .workspace-label { opacity:1; height:auto; margin-bottom:12px; }
+  .primary-sidebar .primary-nav { gap:5px; }
+  .primary-sidebar .nav-item { justify-content:flex-start; gap:12px; min-width:40px; padding:11px 12px; white-space:nowrap; overflow:hidden; }
+  .primary-sidebar .nav-item span { opacity:0; width:0; overflow:hidden; transition:opacity .12s ease; }
+  .primary-sidebar:hover .nav-item span, .primary-sidebar:focus-within .nav-item span { opacity:1; width:auto; }
+  .primary-sidebar .nav-item .nav-count { margin-left:auto; }
+  .sidebar.context-sidebar {
+    width:230px; flex:0 0 230px; margin-left:0; border-left:1px solid #f0f0f5;
+    transition:width .18s ease, flex-basis .18s ease; overflow-x:hidden;
+  }
+  .context-sidebar-heading { padding:2px 10px 14px; color:#999bad; font-size:9px; letter-spacing:1.1px; font-weight:700; white-space:nowrap; }
+  .context-sidebar .side-section-head, .context-sidebar .employee-search,
+  .context-sidebar .department-list, .context-sidebar .chat-list-item,
+  .context-sidebar .side-new-button, .context-sidebar .nav-item.subnav,
+  .context-sidebar .quick-link, .context-sidebar .side-card,
+  .context-sidebar .sidebar-bottom { min-width:190px; }
+  .context-sidebar .sidebar-bottom { margin-top:auto; }
+  .main-panel { flex:1 1 0; min-width:0; }
+}
+@media (max-width: 760px) {
+  .app-body { display:flex; }
+  .sidebar.primary-sidebar { position:fixed; left:0; top:56px; bottom:0; width:58px; flex:0 0 58px; padding:15px 6px; z-index:42; overflow-x:hidden; }
+  .primary-sidebar .workspace-label, .primary-sidebar .nav-item span { display:none; }
+  .primary-sidebar .nav-item { justify-content:center; padding:12px 8px; }
+  .sidebar.context-sidebar { position:fixed; left:58px; top:56px; bottom:0; width:min(245px, calc(100vw - 58px)); max-width:calc(100vw - 58px); z-index:41; box-shadow:10px 0 28px #1f1d3310; overflow-y:auto; }
+  .main-panel { width:100%; min-width:0; }
+}
