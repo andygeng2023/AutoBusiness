@@ -8,6 +8,52 @@ import {
 import "./styles.css";
 import { supabase } from "./supabase";
 
+
+function MarkdownPreview({ content }: { content: string }) {
+  const lines = content.replace(/\r\n?/g, "\n").split("\n");
+  const blocks: Array<{ type: string; text: string; level?: number }> = [];
+  let codeLines: string[] = [];
+  let inCode = false;
+  for (const line of lines) {
+    if (/^\s*~~~|^\s*\x60\x60\x60/.test(line)) {
+      if (inCode) { blocks.push({ type: "code", text: codeLines.join("\n") }); codeLines = []; inCode = false; }
+      else inCode = true;
+      continue;
+    }
+    if (inCode) { codeLines.push(line); continue; }
+    if (!line.trim()) { blocks.push({ type: "space", text: "" }); continue; }
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) { blocks.push({ type: "heading", text: heading[2], level: heading[1].length }); continue; }
+    if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)) { blocks.push({ type: "rule", text: "" }); continue; }
+    if (/^\s*>\s?/.test(line)) { blocks.push({ type: "quote", text: line.replace(/^\s*>\s?/, "") }); continue; }
+    const bullet = line.match(/^\s*[-*+]\s+(.+)$/);
+    if (bullet) { blocks.push({ type: "bullet", text: bullet[1] }); continue; }
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if (ordered) { blocks.push({ type: "ordered", text: ordered[1] }); continue; }
+    blocks.push({ type: "paragraph", text: line });
+  }
+  if (inCode) blocks.push({ type: "code", text: codeLines.join("\n") });
+  const inline = (value: string): React.ReactNode[] => value.split(/(\*\*[^*]+\*\*|__[^_]+__|\x60[^\x60]+\x60|\*[^*]+\*|_[^_]+_|\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g).map((part, index) => {
+    if ((part.startsWith("**") && part.endsWith("**")) || (part.startsWith("__") && part.endsWith("__"))) return <strong key={index}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith("\x60") && part.endsWith("\x60")) return <code key={index}>{part.slice(1, -1)}</code>;
+    if ((part.startsWith("*") && part.endsWith("*")) || (part.startsWith("_") && part.endsWith("_"))) return <em key={index}>{part.slice(1, -1)}</em>;
+    const link = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/);
+    if (link) return <a key={index} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a>;
+    return part;
+  });
+  return <div className="markdown-preview">{blocks.map((block, index) => {
+    if (block.type === "space") return <div className="markdown-space" key={index} />;
+    if (block.type === "heading") { const level = Math.min(block.level ?? 2, 4); if (level === 1) return <h1 key={index}>{inline(block.text)}</h1>; if (level === 2) return <h2 key={index}>{inline(block.text)}</h2>; if (level === 3) return <h3 key={index}>{inline(block.text)}</h3>; return <h4 key={index}>{inline(block.text)}</h4>; }
+    if (block.type === "bullet") return <div className="markdown-list-item bullet" key={index}><span>•</span><div>{inline(block.text)}</div></div>;
+    if (block.type === "ordered") return <div className="markdown-list-item ordered" key={index}><span>{index + 1}.</span><div>{inline(block.text)}</div></div>;
+    if (block.type === "code") return <pre key={index}><code>{block.text}</code></pre>;
+    if (block.type === "quote") return <blockquote key={index}>{inline(block.text)}</blockquote>;
+    if (block.type === "rule") return <hr key={index} />;
+    return <p key={index}>{inline(block.text)}</p>;
+  })}</div>;
+}
+
+
 type Employee = { id: string; name: string; role: string; deptId: string; managerId?: string; tone: string; model: string; instructions: string; status: "Available" | "Working" | "Needs review" | "Paused"; task?: string };
 type Dept = { id: string; name: string; parentId?: string };
 type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string; reviewedBy?: string };
@@ -702,7 +748,7 @@ export default function App() {
       const activeJobs = jobs.filter((job) => ["Queued", "In progress", "Submitted", "Rejected"].includes(job.status));
       const activeGoals = goals.filter((goal) => goal.status === "active" || goal.status === "planned");
       if (!activeJobs.length && !activeGoals.length) return;
-      if (Date.now() - lastTeamPulseRef.current < 10 * 60 * 1000) return;
+      if (Date.now() - lastTeamPulseRef.current < 60 * 1000) return;
       const activeEmployees = employees.filter((employee) => employee.status !== "Paused");
       if (activeEmployees.length < 2) return;
       teamPulseLockRef.current = true;
@@ -710,7 +756,7 @@ export default function App() {
       try {
         const room = await ensureCollaborationRoom();
         if (!room) return;
-        const tickIndex = Math.floor(Date.now() / (10 * 60 * 1000)) % activeEmployees.length;
+        const tickIndex = Math.floor(Date.now() / (60 * 1000)) % activeEmployees.length;
         const actor = activeEmployees[tickIndex];
         const peer = (actor.managerId ? employeeMap.get(actor.managerId) : undefined)
           ?? activeEmployees.find((employee) => employee.managerId === actor.id)
