@@ -664,6 +664,67 @@ export default function App() {
       else notify("Background agent could not complete a job: " + reason);
     } finally { if (!background) setBusy(false); }
   };
+  useEffect(() => {
+    if (demoMode || !user || !company || loadedCompanyId !== company.id || !settings.autoRun || !openRouterKey.trim() || !settings.connectors.includes("OpenRouter")) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || busy || autoRunJobLockRef.current || teamPulseLockRef.current) return;
+      const nextJob = jobs.filter((job) => job.status === "In progress").sort((a, b) => {
+        const aTime = Date.parse(a.created); const bTime = Date.parse(b.created);
+        return (Number.isNaN(aTime) ? 0 : aTime) - (Number.isNaN(bTime) ? 0 : bTime);
+      })[0];
+      if (nextJob) {
+        autoRunJobLockRef.current = true;
+        try { await runJob(nextJob.id, undefined, { background: true }); }
+        finally { autoRunJobLockRef.current = false; }
+        return;
+      }
+      const activeJobs = jobs.filter((job) => ["Queued", "In progress", "Submitted", "Rejected"].includes(job.status));
+      const activeGoals = goals.filter((goal) => goal.status === "active" || goal.status === "planned");
+      if (!activeJobs.length && !activeGoals.length) return;
+      if (Date.now() - lastTeamPulseRef.current < 10 * 60 * 1000) return;
+      const activeEmployees = employees.filter((employee) => employee.status !== "Paused");
+      if (activeEmployees.length < 2) return;
+      teamPulseLockRef.current = true;
+      lastTeamPulseRef.current = Date.now();
+      try {
+        const room = await ensureCollaborationRoom();
+        if (!room) return;
+        const tickIndex = Math.floor(Date.now() / (10 * 60 * 1000)) % activeEmployees.length;
+        const actor = activeEmployees[tickIndex];
+        const peer = (actor.managerId ? employeeMap.get(actor.managerId) : undefined)
+          ?? activeEmployees.find((employee) => employee.managerId === actor.id)
+          ?? activeEmployees.find((employee) => employee.id !== actor.id);
+        if (!peer || actor.id === peer.id) return;
+        const jobContext = activeJobs.slice(0, 8).map((job) => "- " + job.title + " (" + job.status + ", owner: " + (employeeMap.get(job.employeeId)?.name ?? "unassigned") + "): " + (job.description || "No brief supplied")).join("\n");
+        const goalContext = activeGoals.slice(0, 8).map((goal) => "- " + goal.title + " (" + goal.progress + "%): " + goal.description).join("\n");
+        const priorTeamChat = room.messages.slice(-8).map((message) => (employeeMap.get(message.from)?.name ?? message.from) + ": " + message.text).join("\n");
+        const actorModel = freeModels.some((item) => item.id === actor.model) ? actor.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
+        const peerModel = freeModels.some((item) => item.id === peer.model) ? peer.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
+        const update = (await requestOpenRouter(actorModel, [
+          { role: "system", content: "You are " + actor.name + ", " + actor.role + " at " + company.name + ". You are an autonomous teammate who can coordinate with coworkers. Your manager is " + managerNameFor(actor.managerId) + ". Use only the supplied workspace facts. Identify one useful coordination point, ask " + peer.name + " for input, or return exactly [NO_UPDATE] when nothing new and actionable is needed. Do not invent progress, decisions, metrics, or actions. Keep any message under 120 words; do not repeat previous check-ins." },
+          { role: "user", content: "ACTIVE JOBS:\n" + (jobContext || "No open jobs.") + "\n\nGOALS:\n" + (goalContext || "No active goals.") + "\n\nRECENT TEAM COLLABORATION:\n" + (priorTeamChat || "No previous collaboration messages.") + "\n\nWrite one genuinely useful internal coordination message, or [NO_UPDATE]." }
+        ], openRouterKey)).trim();
+        if (!update || /^\[NO_UPDATE\]$/i.test(update) || /^NO_ACTION$/i.test(update)) return;
+        const reply = (await requestOpenRouter(peerModel, [
+          { role: "system", content: "You are " + peer.name + ", " + peer.role + " collaborating with " + actor.name + ". Respond to the colleague’s internal update with concrete, useful input or a clarifying question. Use only the provided facts. Do not invent progress or claim actions were completed. If no useful response is possible, return exactly [NO_UPDATE]. Keep under 100 words." },
+          { role: "user", content: "ACTIVE JOBS:\n" + (jobContext || "No open jobs.") + "\n\nACTIVE GOALS:\n" + (goalContext || "No active goals.") + "\n\n" + actor.name + " wrote:\n" + update }
+        ], openRouterKey)).trim();
+        const now = new Date().toISOString();
+        const entries: Message[] = [{ id: crypto.randomUUID(), from: actor.id, text: update.slice(0, 2000), time: nowTime(), createdAt: now }];
+        if (reply && !/^\[NO_UPDATE\]$/i.test(reply) && !/^NO_ACTION$/i.test(reply)) entries.push({ id: crypto.randomUUID(), from: peer.id, text: reply.slice(0, 1600), time: nowTime(), createdAt: new Date(Date.now() + 1).toISOString() });
+        appendAgentMessages(room, entries);
+      } catch (error) {
+        notify("Background collaboration could not run: " + describeError(error, "Unknown AI error"));
+      } finally {
+        teamPulseLockRef.current = false;
+      }
+    };
+    const timer = window.setInterval(() => { void tick(); }, 15000);
+    void tick();
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [demoMode, user?.id, company?.id, loadedCompanyId, settings.autoRun, settings.connectors, openRouterKey, jobs, employees, conversations, goals, freeModels, busy]);
+
   const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
   const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress" } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
   const requestRevision = (jobId: string) => { if (!reviewNote.trim()) { notify("Add a note explaining what needs to change"); return; } setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Rejected", reviewNote: reviewNote.trim() } : j)); notify("Revision requested — feedback saved to the job"); };
