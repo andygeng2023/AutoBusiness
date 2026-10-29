@@ -556,7 +556,39 @@ export default function App() {
       setBusy(false);
     }
   };
-  const runJob = async (jobId: string, feedbackOverride?: string) => {
+  const ensureCollaborationRoom = async (): Promise<Conversation | null> => {
+    const existing = conversations.find((conversation) => conversation.name === "Team collaboration" && conversation.kind === "group");
+    if (existing) return existing;
+    if (collaborationRoomRef.current) return collaborationRoomRef.current;
+    const pending = (async () => {
+      if (!company || !user) return null;
+      const id = crypto.randomUUID();
+      const members = employees.filter((employee) => employee.status !== "Paused").map((employee) => employee.id);
+      const room: Conversation = { id, name: "Team collaboration", kind: "group", members, messages: [], createdBy: user.id };
+      if (!demoMode) {
+        const { error } = await supabase.from("conversations").insert({ id, company_id: company.id, name: room.name, kind: "group", created_by: user.id });
+        if (error) throw error;
+        const rows = [{ company_id: company.id, conversation_id: id, user_id: user.id, employee_id: null }, ...members.map((employeeId) => ({ company_id: company.id, conversation_id: id, user_id: null, employee_id: employeeId }))];
+        const { error: membershipError } = await supabase.from("conversation_members").insert(rows);
+        if (membershipError) throw membershipError;
+      }
+      setConversations((old) => old.some((conversation) => conversation.name === room.name && conversation.kind === "group") ? old : [room, ...old]);
+      return room;
+    })();
+    collaborationRoomRef.current = pending;
+    try { return await pending; }
+    finally { collaborationRoomRef.current = null; }
+  };
+  const appendAgentMessages = (room: Conversation, messages: Message[]) => {
+    if (!messages.length) return;
+    setConversations((old) => {
+      const exists = old.some((conversation) => conversation.id === room.id);
+      if (!exists) return [{ ...room, messages: [...room.messages, ...messages] }, ...old];
+      return old.map((conversation) => conversation.id === room.id ? { ...conversation, messages: [...conversation.messages, ...messages] } : conversation);
+    });
+  };
+  const runJob = async (jobId: string, feedbackOverride?: string, options: { background?: boolean } = {}) => {
+    const background = Boolean(options.background);
     if (demoMode) {
       const job = jobs.find((item) => item.id === jobId);
       if (!job || busy) return;
@@ -566,27 +598,71 @@ export default function App() {
       setSelectedJobId(jobId); notify("Demo deliverable created — review the work");
       return;
     }
-    if (!settings.connectors.includes("OpenRouter")) { notify("Enable OpenRouter in Settings before running AI jobs"); return; }
-    if (!openRouterKey.trim()) { notify("Add your OpenRouter API key in Settings → Connectors first."); setPage("Settings"); setActiveSettings("Connectors"); return; }
-    const job = jobs.find((j) => j.id === jobId);
-    if (!job || busy) return;
+    if (!settings.connectors.includes("OpenRouter")) { if (!background) notify("Enable OpenRouter in Settings before running AI jobs"); return; }
+    if (!openRouterKey.trim()) { if (!background) { notify("Add your OpenRouter API key in Settings → Connectors first."); setPage("Settings"); setActiveSettings("Connectors"); } return; }
+    if (!background && autoRunJobLockRef.current) { notify("A background agent is already working on a job."); return; }
+    if (!background && busy) return;
+    const job = jobs.find((item) => item.id === jobId);
+    if (!job) return;
     const emp = employeeMap.get(job.employeeId);
-    if (!emp) { notify("This job has no assigned employee"); return; }
-    setBusy(true);
+    if (!emp) { if (!background) notify("This job has no assigned employee"); return; }
+    if (!background) setBusy(true);
     try {
-      const prompt = "You are " + emp.name + ", " + emp.role + " working on a delegated job in a company workspace. Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\\n\\nJOB: " + job.title + "\\n\\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\\n\\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\\n\\nProduce the actual deliverable for this job, not a plan to do it. Use clear headings and concrete content. Address any previous review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly.";
-      const model = freeModels.some((item) => item.id === emp.model) ? emp.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
-      const output = await requestOpenRouter(model, [{ role: "user", content: prompt }], openRouterKey);
-      if (!output.trim()) throw new Error("The AI provider returned an empty deliverable.");
-      setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Submitted", result: output, submittedAt: new Date().toISOString() } : j));
-      setEmployees((old) => old.map((e) => e.id === emp.id ? { ...e, status: "Needs review", task: job.title } : e));
-      setConversations((old) => old.map((c) => c.kind === "group" ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: emp.id, text: "I’ve completed the deliverable for “" + job.title + "”. Open the job to inspect the actual work before approving it.", time: nowTime(), createdAt: new Date().toISOString(), jobId }] } : c));
-      setSelectedJobId(jobId);
-      notify("Deliverable created — review the work");
+      const modelFor = (employee: Employee) => freeModels.some((item) => item.id === employee.model) ? employee.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
+      const department = departmentPath(emp.deptId);
+      const manager = emp.managerId ? employeeMap.get(emp.managerId) : undefined;
+      const reviewer = manager && manager.status !== "Paused"
+        ? manager
+        : employees.find((candidate) => candidate.id !== emp.id && candidate.status !== "Paused" && candidate.deptId === emp.deptId)
+          ?? employees.find((candidate) => candidate.id !== emp.id && candidate.status !== "Paused");
+      const prompt = "You are " + emp.name + ", " + emp.role + " in " + department + " at " + company?.name + ". Your manager is " + (manager?.name ?? "the company owner") + ". Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\n\nJOB: " + job.title + "\n\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\n\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\n\nProduce the actual deliverable, not a plan to do it. Use clear headings and concrete content. Address review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly.";
+      const draft = (await requestOpenRouter(modelFor(emp), [{ role: "user", content: prompt }], openRouterKey)).trim();
+      if (!draft) throw new Error("The AI provider returned an empty deliverable.");
+      let output = draft;
+      let reviewFeedback = "";
+      if (reviewer) {
+        try {
+          reviewFeedback = (await requestOpenRouter(modelFor(reviewer), [
+            { role: "system", content: "You are " + reviewer.name + ", " + reviewer.role + " and " + (manager?.id === reviewer.id ? "the manager" : "a collaborating colleague") + " of " + emp.name + ". Review the draft against the brief. Give concise, specific feedback: gaps, factual cautions, missing acceptance criteria and concrete improvements. Do not rewrite the entire deliverable and do not invent facts." },
+            { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nDRAFT FROM " + emp.name + ":\n" + draft + "\n\nProvide a useful peer review in under 250 words." }
+          ], openRouterKey)).trim();
+          if (reviewFeedback) {
+            const revised = (await requestOpenRouter(modelFor(emp), [
+              { role: "system", content: "You are " + emp.name + ", " + emp.role + ". Refine your deliverable using the peer review. Keep strong original material, address valid issues, and do not blindly accept unsupported feedback. Produce only the revised final deliverable." },
+              { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nYOUR FIRST DRAFT:\n" + draft + "\n\nREVIEW FROM " + reviewer.name + ":\n" + reviewFeedback + "\n\nPREVIOUS USER FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None") }
+            ], openRouterKey)).trim();
+            if (revised) output = revised;
+          }
+        } catch (reviewError) {
+          // A peer-review failure should not discard an otherwise usable deliverable.
+          reviewFeedback = "";
+          if (!background) notify("The deliverable was generated, but peer review was unavailable: " + describeError(reviewError, "Unknown review error"));
+        }
+      }
+      const submittedAt = new Date().toISOString();
+      setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Submitted", result: output, submittedAt } : item));
+      setEmployees((old) => old.map((employee) => employee.id === emp.id ? { ...employee, status: "Needs review", task: job.title } : employee));
+      if (reviewFeedback && reviewer) {
+        const collaborationMessages: Message[] = [
+          { id: crypto.randomUUID(), from: emp.id, text: "I have prepared a first draft for “" + job.title + "”. " + reviewer.name + ", could you review the gaps and acceptance criteria before I submit it?", time: nowTime(), createdAt: submittedAt, jobId },
+          { id: crypto.randomUUID(), from: reviewer.id, text: "Peer review for “" + job.title + "”:\n\n" + reviewFeedback.slice(0, 1800), time: nowTime(), createdAt: submittedAt, jobId },
+          { id: crypto.randomUUID(), from: emp.id, text: "I considered " + reviewer.name + "’s feedback, revised the deliverable and submitted it for your review.", time: nowTime(), createdAt: submittedAt, jobId }
+        ];
+        try {
+          const room = await ensureCollaborationRoom();
+          if (room) appendAgentMessages(room, collaborationMessages);
+        } catch (roomError) {
+          notify("Deliverable completed; collaboration log could not be saved: " + describeError(roomError, "Unknown error"));
+        }
+      } else {
+        setConversations((old) => old.map((conversation) => conversation.kind === "group" && conversation.name !== "Team collaboration" ? { ...conversation, messages: [...conversation.messages, { id: crypto.randomUUID(), from: emp.id, text: "I’ve completed the deliverable for “" + job.title + "”. Open the job to inspect the actual work before approving it.", time: nowTime(), createdAt: submittedAt, jobId }] } : conversation));
+      }
+      if (!background) { setSelectedJobId(jobId); notify("Deliverable created and submitted for review"); }
     } catch (error) {
       const reason = describeError(error, "Unknown OpenRouter error");
-      notify("AI job failed: " + reason);
-    } finally { setBusy(false); }
+      if (!background) notify("AI job failed: " + reason);
+      else notify("Background agent could not complete a job: " + reason);
+    } finally { if (!background) setBusy(false); }
   };
   const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
   const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress" } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
