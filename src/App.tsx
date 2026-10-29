@@ -345,7 +345,7 @@ export default function App() {
         await window.puter.auth.signIn();
       }
 
-      const dialogue = history.map((m) => {
+      const dialogue = activeConversation.messages.map((m) => {
         const speaker = m.from === "you" ? "User" : m.from === "system" ? "System" : employeeMap.get(m.from)?.name ?? "Team member";
         return speaker + ": " + m.text;
       }).join("\\n\\n");
@@ -363,18 +363,22 @@ export default function App() {
       // Every member receives the same full dialogue and the latest request. Each decides
       // independently whether they have a useful contribution to make to the group.
       const replies = await Promise.all(targets.map(async (emp) => {
-        const model = emp.model.includes("Claude") ? "claude-sonnet-4-6" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
-        const groupInstruction = activeConversation.kind === "group"
-          ? "You are participating in a group conversation with other employees. Read the entire dialogue and the latest user request. Decide independently whether your role and expertise add something useful. If you have no meaningful contribution, output exactly [[NO_REPLY]] and nothing else. Do not reply just to acknowledge the message. If you do reply, address the user or build on another team member's point; do not pretend to be another employee."
-          : "Reply directly to the latest user message. Use the previous dialogue as conversation memory. Do not repeat information unnecessarily.";
-        const prompt = [
-          { role: "system", content: "You are " + emp.name + ", " + emp.role + " in the " + company?.name + " workspace. Tone: " + emp.tone + ". Custom instructions: " + (emp.instructions || "Be accurate and useful.") + ". Current task: " + (emp.task || "none") + ". " + groupInstruction },
-          { role: "user", content: "FULL CONVERSATION HISTORY (oldest first):\\n\\n" + dialogue + "\\n\\nLATEST REQUEST: " + text + "\\n\\nUse the history as your working memory for this reply. Keep relevant facts, decisions, preferences, and unresolved questions consistent. Answer only the latest request." }
-        ];
-        const result = await window.puter!.ai!.chat(prompt, { model, normalize: true });
-        const content = (result as { message?: { content?: unknown } })?.message?.content;
-        const answer = typeof result === "string" ? result : typeof content === "string" ? content : Array.isArray(content) ? content.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "").join("\\n") : "";
-        return { emp, answer: answer.trim() };
+        try {
+          const model = emp.model.includes("Claude") ? "claude-sonnet-4-6" : emp.model === "GPT-4o" ? "gpt-4o" : "gpt-4o-mini";
+          const groupInstruction = activeConversation.kind === "group"
+            ? "You are participating in a group conversation with other employees. Read the entire dialogue and the latest user request. Decide independently whether your role and expertise add something useful. If you have no meaningful contribution, output exactly [[NO_REPLY]] and nothing else. Do not reply just to acknowledge the message. If you do reply, address the user or build on another team member's point; do not pretend to be another employee."
+            : "Reply directly to the latest user message. Use the previous dialogue as conversation memory. Do not repeat information unnecessarily.";
+          const prompt = [
+            { role: "system", content: "You are " + emp.name + ", " + emp.role + " in the " + company?.name + " workspace. Tone: " + emp.tone + ". Custom instructions: " + (emp.instructions || "Be accurate and useful.") + ". Current task: " + (emp.task || "none") + ". " + groupInstruction },
+            { role: "user", content: "FULL CONVERSATION HISTORY (oldest first):\\n\\n" + (dialogue || "(No previous messages.)") + "\\n\\nLATEST REQUEST: " + text + "\\n\\nUse the history as your working memory for this reply. Keep relevant facts, decisions, preferences, and unresolved questions consistent. Answer only the latest request." }
+          ];
+          const result = await window.puter!.ai!.chat(prompt, { model, normalize: true });
+          const content = (result as { message?: { content?: unknown } })?.message?.content;
+          const answer = typeof result === "string" ? result : typeof content === "string" ? content : Array.isArray(content) ? content.map((part: unknown) => part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "").join("\\n") : "";
+          return { emp, answer: answer.trim(), error: "" };
+        } catch (error) {
+          return { emp, answer: "", error: describeError(error, "Unknown Puter error") };
+        }
       }));
 
       const responses: Message[] = replies
@@ -383,9 +387,15 @@ export default function App() {
 
       if (responses.length) {
         setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, ...responses] } : c));
-      } else if (activeConversation.kind === "group") {
+      } else if (activeConversation.kind === "group" && !replies.some(({ error }) => error)) {
         setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: "system", text: "The team reviewed the message; nobody had a useful contribution to add yet.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
-      } else if (!replies[0]?.answer) {
+      }
+      const failures = replies.filter(({ error }) => error);
+      if (failures.length) {
+        const summary = failures.map(({ emp, error }) => emp.name + ": " + error).join(" | ");
+        notify("Some AI replies failed: " + summary);
+      }
+      if (activeConversation.kind === "private" && !responses.length && !failures.length) {
         throw new Error("Puter returned an empty reply. Check the selected model and your Puter account.");
       }
     } catch (error) {
