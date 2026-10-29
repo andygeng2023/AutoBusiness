@@ -591,7 +591,7 @@ export default function App() {
     setPage("Communication");
   };
   const employeeNameFor = (id: string) => id === "you" ? "You" : id === "teammate" ? "Teammate" : employeeMap.get(id)?.name ?? "AutoBusiness";
-  const filteredEmployees = employees.filter((e) => (e.name + " " + e.role).toLowerCase().includes(search.toLowerCase()));
+  const filteredEmployees = employees.filter((e) => (e.name + " " + e.role + " " + (depts.find((d) => d.id === e.deptId)?.name ?? "")).toLowerCase().includes(search.toLowerCase()));
   const departmentTree = (parent?: string, depth = 0): JSX.Element[] => depts.filter((d) => d.parentId === parent).flatMap((d) => {
     const members = filteredEmployees.filter((e) => e.deptId === d.id);
     const children = departmentTree(d.id, depth + 1);
