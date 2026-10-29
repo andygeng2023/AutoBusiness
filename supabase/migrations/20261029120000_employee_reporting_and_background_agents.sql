@@ -131,6 +131,10 @@ create trigger departments_validate_parent_link
 before insert or update on public.departments
 for each row execute function public.validate_department_parent_link();
 
+-- These trigger-only functions are not public RPC endpoints.
+revoke all on function public.validate_employee_manager_link() from public, anon, authenticated;
+revoke all on function public.validate_department_parent_link() from public, anon, authenticated;
+
 -- Populate the reporting lines for the original starter-team templates in
 -- existing workspaces. Custom employees and other names remain unassigned.
 update public.employees employee
