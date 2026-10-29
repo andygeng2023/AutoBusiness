@@ -386,9 +386,11 @@ export default function App() {
       const authenticatedUser = authData.user;
       if (!authenticatedUser) throw new Error("Your session has expired. Sign in again before creating a workspace.");
       const name = companyName.trim();
-      const { data: created, error } = await supabase.rpc("create_company_workspace", { p_name: name, p_industry: "New workspace" }).single();
+      const { data: createdResult, error } = await supabase.rpc("create_company_workspace", { p_name: name, p_industry: "New workspace" }).single();
       if (error) throw error;
-      const companyId = created.id as string;
+      const created = createdResult as { id: string; name: string; industry: string } | null;
+      if (!created) throw new Error("Supabase did not return the created workspace.");
+      const companyId = created.id;
       const deptIds = new Map(seedDepts.map((dept) => [dept.id, crypto.randomUUID()]));
       const departmentRows = seedDepts.map((dept) => ({ id: deptIds.get(dept.id), company_id: companyId, name: dept.name, parent_id: dept.parentId ? deptIds.get(dept.parentId) : null }));
       const { error: deptError } = await supabase.from("departments").insert(departmentRows);
