@@ -648,10 +648,12 @@ export default function App() {
       <div className="topbar-right"><span className="saved-indicator"><span className="online-dot" /> Supabase connected</span><button className="icon-button" title="Help" onClick={() => notify("Help centre coming soon")}><CircleHelp size={17} /></button><button className="profile-button" title={"Sign out " + (user?.email ?? "")} onClick={() => void signOut()}>{initials(user?.email?.split("@")[0] ?? "U")}</button></div>
     </header>
     <div className="app-body">
-      {sidebarOpen && <aside className="sidebar">
+      {sidebarOpen && <aside className="sidebar primary-sidebar">
         <div className="workspace-label">WORKSPACE</div>
-        <nav className="primary-nav">{nav.map(({ label, icon: Icon, count }) => <button key={label} className={"nav-item " + (page === label ? "active" : "")} onClick={() => changePage(label)}><Icon size={17} strokeWidth={1.8} /><span>{label}</span>{count ? <span className="nav-count">{count}</span> : null}</button>)}</nav>
-        <div className="sidebar-divider" />
+        <nav className="primary-nav">{nav.map(({ label, icon: Icon, count }) => <button key={label} title={label} className={"nav-item " + (page === label ? "active" : "")} onClick={() => changePage(label)}><Icon size={17} strokeWidth={1.8} /><span>{label}</span>{count ? <span className="nav-count">{count}</span> : null}</button>)}</nav>
+      </aside>}
+      {sidebarOpen && <aside className="sidebar context-sidebar">
+        <div className="context-sidebar-heading"><span>{page === "Communication" ? "COMMUNICATION" : page === "Employees" ? "EMPLOYEES" : page === "Settings" ? "SETTINGS" : page.toUpperCase()}</span></div>
         {page === "Communication" ? <>
           <div className="side-section-head"><span>MESSAGES</span><button className="tiny-icon" onClick={() => setShowChatForm(true)} title="New chat"><Plus size={15} /></button></div>
           {conversations.filter((c) => c.kind === "group").map((c) => <button key={c.id} className={"chat-list-item " + (selectedChat === c.id ? "chosen" : "")} onClick={() => setSelectedChat(c.id)}><span className="chat-avatar team-avatar"><Users size={15} /></span><span className="chat-label"><strong>{c.name}</strong><small>Group conversation</small></span></button>)}
