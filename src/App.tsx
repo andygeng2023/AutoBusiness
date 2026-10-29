@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Activity, ArrowDownLeft, ArrowLeft, ArrowUpRight, Bot, Building2, Check,
   CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Gauge,
-  Inbox, LayoutDashboard, LockKeyhole, MessageCircle, MoreHorizontal, Plus,
+  Inbox, LayoutDashboard, LockKeyhole, Menu, MessageCircle, MoreHorizontal, Plus,
   Search, Send, Settings2, ShieldCheck, Sparkles, Users, Workflow, Zap
 } from "lucide-react";
 import "./styles.css";
@@ -32,6 +32,34 @@ const seedEmployees: Employee[] = [
   { id: "jules", name: "Jules Park", role: "Product Designer", deptId: "design", tone: "Curious & collaborative", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Explain trade-offs and design for accessibility.", status: "Available" }
 ];
 const defaultSettings: Settings = { approvalRequired: true, dailyLimit: 50, monthlyLimit: 900, autoRun: false, connectors: ["OpenRouter", "Supabase"] };
+const demoCompany: Company = { id: "demo-company", name: "Northstar Studio", industry: "Creative services", initials: "NS", color: "blue", description: "Interactive sample workspace" };
+const makeDemoJobs = (): Job[] => {
+  const now = Date.now();
+  const yesterday = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+  const twoDaysAgo = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString();
+  return [
+    { id: "demo-job-review", title: "Q4 campaign positioning", description: "Recommend a positioning direction for a small creative studio, including audience, message, and proof points.", employeeId: "leo", status: "Submitted", priority: "Urgent", created: yesterday, submittedAt: yesterday, result: "# Q4 campaign positioning\n\n**Recommendation:** Lead with a clear, customer-centred promise and support it with practical evidence.\n\n## Audience\nSmall teams that need reliable creative support without adding operational complexity.\n\n## Message\nMake the next stage of growth easier to execute.\n\n## Next steps\nValidate the message with three existing customers, then use their language in the landing page and campaign brief.\n\n*This is illustrative demo content, not generated business advice.*" },
+    { id: "demo-job-queued", title: "Benchmark competitor onboarding", description: "Prepare a concise comparison checklist for evaluating competitor onboarding flows.", employeeId: "maya", status: "Queued", priority: "Normal", created: new Date(now - 30 * 60 * 1000).toISOString() },
+    { id: "demo-job-progress", title: "Outline customer onboarding", description: "Draft an onboarding sequence with the first three customer milestones.", employeeId: "amara", status: "In progress", priority: "Normal", created: new Date(now - 3 * 60 * 60 * 1000).toISOString() },
+    { id: "demo-job-approved", title: "Weekly growth summary", description: "Summarise the signals to check in a weekly growth review.", employeeId: "noah", status: "Approved", priority: "Normal", created: twoDaysAgo, submittedAt: twoDaysAgo, result: "# Weekly growth summary\n\nReview acquisition, activation, retention, and conversion as separate stages. For each stage, record the baseline, the change from the prior period, and the next experiment.\n\n*Illustrative demo content.*" }
+  ];
+};
+const makeDemoConversations = (): Conversation[] => [
+  { id: "demo-group", name: "Company team", kind: "group", members: ["maya", "leo", "amara", "noah"], messages: [
+    { id: "demo-msg-1", from: "you", text: "Can we agree on one clear message for the next campaign?", time: "09:14", createdAt: new Date(Date.now() - 90 * 60 * 1000).toISOString() },
+    { id: "demo-msg-2", from: "leo", text: "I’m comparing the current positioning with the questions customers ask most often. I’ll bring a recommendation and supporting points back for review.", time: "09:16", createdAt: new Date(Date.now() - 88 * 60 * 1000).toISOString() },
+    { id: "demo-msg-3", from: "noah", text: "I’ll check which measures could tell us whether the message is working, rather than relying on clicks alone.", time: "09:18", createdAt: new Date(Date.now() - 86 * 60 * 1000).toISOString() }
+  ] },
+  { id: "demo-private-leo", name: "Leo Martin", kind: "private", members: ["leo"], messages: [
+    { id: "demo-msg-4", from: "you", text: "Please keep recommendations practical and explain the trade-offs.", time: "Yesterday", createdAt: new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString() },
+    { id: "demo-msg-5", from: "leo", text: "Understood. I’ll distinguish the strongest option from the alternatives and note what evidence would validate the choice.", time: "Yesterday", createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString() }
+  ] },
+  { id: "demo-private-maya", name: "Maya Chen", kind: "private", members: ["maya"], messages: [] }
+];
+const makeDemoGoals = (): Goal[] => [
+  { id: "demo-goal-1", title: "Clarify our core positioning", description: "Validate the main value proposition with customers.", progress: 65, dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), status: "active" },
+  { id: "demo-goal-2", title: "Make onboarding more consistent", description: "Document a simple first-week customer journey.", progress: 30, status: "active" }
+];
 const fallbackFreeModels = [{ id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B (free)" }, { id: "google/gemma-3-27b-it:free", name: "Gemma 3 27B (free)" }, { id: "deepseek/deepseek-r1-0528:free", name: "DeepSeek R1 (free)" }];
 const openRouterKeyName = "autobusiness_openrouter_api_key";
 const initials = (name: string) => name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
@@ -66,6 +94,9 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [mobileContextOpen, setMobileContextOpen] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
@@ -88,7 +119,6 @@ export default function App() {
   const [goalDescription, setGoalDescription] = useState("");
   const [goalDueDate, setGoalDueDate] = useState("");
   const [page, setPage] = useState("Dashboard");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedEmployee, setSelectedEmployee] = useState("maya");
   const [selectedChat, setSelectedChat] = useState("");
   const [showChatDetails, setShowChatDetails] = useState(false);
@@ -140,7 +170,7 @@ export default function App() {
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
   useEffect(() => {
-    if (!user) return;
+    if (!user || demoMode) return;
     let active = true;
     setLoadingCompanies(true);
     supabase.from("companies").select("id,name,industry,created_by,created_at").order("created_at", { ascending: false }).then(({ data, error }) => {
@@ -152,22 +182,22 @@ export default function App() {
     return () => { active = false; };
   }, [user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     const companyId = company.id;
     void supabase.from("departments").upsert(depts.map((d) => ({ id: d.id, company_id: companyId, name: d.name, parent_id: d.parentId ?? null })), { onConflict: "id" }).then(({ error }) => { if (error && depts.length) notify("Department save failed: " + error.message); });
   }, [depts, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     const companyId = company.id;
     void supabase.from("employees").upsert(employees.map((e) => ({ id: e.id, company_id: companyId, department_id: e.deptId || null, name: e.name, role: e.role, tone: e.tone, model: e.model, custom_instructions: e.instructions, status: e.status === "Needs review" ? "needs_review" : e.status.toLowerCase(), current_task: e.task ?? null, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && employees.length) notify("Employee save failed: " + error.message); });
   }, [employees, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     const companyId = company.id;
     void supabase.from("jobs").upsert(jobs.map((j) => ({ id: j.id, company_id: companyId, employee_id: j.employeeId || null, title: j.title, description: j.description ?? "", status: j.status.toLowerCase().replace(" ", "_"), priority: j.priority.toLowerCase(), result: j.result ?? "", created_by: j.createdBy ?? user.id, reviewed_by: j.reviewedBy ?? (j.status === "Approved" ? user.id : null), created_at: j.created && !Number.isNaN(Date.parse(j.created)) ? new Date(j.created).toISOString() : new Date().toISOString(), submitted_at: j.submittedAt ? (Number.isNaN(Date.parse(j.submittedAt)) ? new Date().toISOString() : new Date(j.submittedAt).toISOString()) : null, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && jobs.length) notify("Job save failed: " + error.message); });
   }, [jobs, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     const companyId = company.id;
     const rows = conversations.flatMap((c) => c.messages.filter((m) => m.from !== "teammate" && m.from !== "system").map((m) => ({
       id: m.id, company_id: companyId, conversation_id: c.id,
@@ -178,15 +208,15 @@ export default function App() {
     if (rows.length) void supabase.from("messages").upsert(rows, { onConflict: "id", ignoreDuplicates: true }).then(({ error }) => { if (error) notify("Message save failed: " + error.message); });
   }, [conversations, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     void supabase.from("workspace_settings").upsert({ company_id: company.id, approval_required: settings.approvalRequired, auto_run: settings.autoRun, daily_usage_limit: settings.dailyLimit, monthly_usage_limit: settings.monthlyLimit, enabled_connectors: settings.connectors.map((c) => (({ "OpenRouter": "openrouter" } as Record<string, string>)[c] ?? c.toLowerCase().replaceAll(" ", "_"))) }, { onConflict: "company_id" }).then(({ error }) => { if (error) notify("Settings save failed: " + error.message); });
   }, [settings, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     void supabase.from("goals").upsert(goals.map((g) => ({ id: g.id, company_id: company.id, title: g.title, description: g.description, progress: g.progress, due_date: g.dueDate || null, status: g.status, created_by: g.createdBy ?? user.id, updated_at: new Date().toISOString() })), { onConflict: "id" }).then(({ error }) => { if (error && goals.length) notify("Goal save failed: " + error.message); });
   }, [goals, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
-    if (!user || !company || loadedCompanyId !== company.id) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
     void supabase.from("companies").update({ name: company.name, industry: company.industry, updated_at: new Date().toISOString() }).eq("id", company.id).then(({ error }) => { if (error) notify("Company settings save failed: " + error.message); });
   }, [company?.name, company?.industry, loadedCompanyId, user?.id]);
   useEffect(() => { if (toast) { const timer = window.setTimeout(() => setToast(""), 2800); return () => window.clearTimeout(timer); } }, [toast]);
@@ -206,6 +236,18 @@ export default function App() {
   ];
 
   const notify = (text: string) => setToast(text);
+  const startInteractiveDemo = () => {
+    setDemoMode(true);
+    setUser({ id: "demo-user", email: "demo@autobusiness.local" });
+    setCompanies([{ ...demoCompany }]); setCompany({ ...demoCompany }); setLoadedCompanyId(demoCompany.id);
+    setDepts(seedDepts.map((department) => ({ ...department })));
+    setEmployees(seedEmployees.map((employee) => ({ ...employee })));
+    setJobs(makeDemoJobs()); setConversations(makeDemoConversations()); setGoals(makeDemoGoals());
+    setSettings({ ...defaultSettings }); setMemberRole("owner");
+    setSelectedEmployee("maya"); setJobEmployee("maya"); setNewEmployeeDept("leadership"); setSelectedChat("demo-group");
+    setPage("Dashboard"); setMobileContextOpen(false); setAuthError(""); setAuthNotice(""); setToast(""); setSelectedJobId(null);
+    setShowJobForm(false); setShowEmployeeForm(false); setShowCompanyForm(false); setShowChatForm(false); setShowGoalForm(false); setShowInviteForm(false);
+  };
   const handleAuthSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setAuthError(""); setAuthNotice("");
@@ -226,11 +268,26 @@ export default function App() {
     } finally { setAuthBusy(false); }
   };
   const signOut = async () => {
+    if (demoMode) {
+      setDemoMode(false); setCompany(null); setCompanies([]); setLoadedCompanyId(null); setUser(null);
+      setDepts([]); setEmployees([]); setJobs([]); setConversations([]); setGoals([]); setSettings(defaultSettings);
+      setSelectedChat(""); setSelectedEmployee("maya"); setPage("Dashboard"); setMobileContextOpen(false); setToast("");
+      return;
+    }
     const { error } = await supabase.auth.signOut();
     if (error) notify("Could not sign out: " + error.message);
     else { setCompany(null); setLoadedCompanyId(null); setCompanies([]); setUser(null); }
   };
   const openCompany = async (item: Company) => {
+    if (demoMode) {
+      setCompany(item); setLoadingWorkspace(false); setPage("Dashboard"); setLoadedCompanyId(item.id);
+      setDepts(seedDepts.map((department) => ({ ...department })));
+      setEmployees(seedEmployees.map((employee) => ({ ...employee })));
+      setJobs(makeDemoJobs()); setConversations(makeDemoConversations()); setGoals(makeDemoGoals());
+      setSettings({ ...defaultSettings }); setMemberRole("owner");
+      setSelectedEmployee("maya"); setJobEmployee("maya"); setNewEmployeeDept("leadership"); setSelectedChat("demo-group");
+      return;
+    }
     setCompany(item);
     setLoadedCompanyId(null);
     setLoadingWorkspace(true);
@@ -302,7 +359,7 @@ export default function App() {
   };
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("invite");
-    if (!user || !token || inviteHandledRef.current) return;
+    if (demoMode || !user || !token || inviteHandledRef.current) return;
     inviteHandledRef.current = true;
     const accept = async () => {
       try {
@@ -323,7 +380,11 @@ export default function App() {
     };
     void accept();
   }, [user?.id]);
-  const changePage = (next: string) => { setPage(next); if (next === "Communication") setSelectedChat(conversations.find((c) => c.kind === "group")?.id ?? conversations[0]?.id ?? ""); };
+  const changePage = (next: string) => {
+    setPage(next);
+    setMobileContextOpen(true);
+    if (next === "Communication") setSelectedChat(conversations.find((c) => c.kind === "group")?.id ?? conversations[0]?.id ?? "");
+  };
   const createJob = (event: FormEvent) => {
     event.preventDefault();
     if (!jobTitle.trim() || !company || !user || !jobEmployee) { notify("Create an employee before assigning a job"); return; }
@@ -335,7 +396,7 @@ export default function App() {
     };
     if (jobs.filter((job) => countInPeriod(job, "day")).length >= settings.dailyLimit) { notify("Daily job creation limit reached. Increase the limit in Settings to assign more work."); return; }
     if (jobs.filter((job) => countInPeriod(job, "month")).length >= settings.monthlyLimit) { notify("Monthly job creation limit reached. Increase the limit in Settings to assign more work."); return; }
-    const job: Job = { id: crypto.randomUUID(), title: jobTitle.trim(), description: jobDescription.trim(), employeeId: jobEmployee, status: settings.autoRun || !settings.approvalRequired ? "In progress" : "Queued", priority: jobPriority, created: new Date().toISOString(), createdBy: user.id };
+    const job: Job = { id: crypto.randomUUID(), title: jobTitle.trim(), description: jobDescription.trim(), employeeId: jobEmployee, status: settings.approvalRequired ? "Queued" : "In progress", priority: jobPriority, created: new Date().toISOString(), createdBy: user.id };
     setJobs((old) => [job, ...old]);
     setEmployees((old) => old.map((e) => e.id === jobEmployee ? { ...e, status: job.status === "Queued" ? "Available" : "Working", task: job.title } : e));
     setJobTitle(""); setJobDescription(""); setJobPriority("Normal"); setShowJobForm(false); notify(settings.approvalRequired ? "Job queued for approval" : "Job assigned");
@@ -347,6 +408,33 @@ export default function App() {
     setMessage("");
     const sent: Message = { id: crypto.randomUUID(), from: "you", text, time: nowTime(), createdAt: new Date().toISOString() };
     setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, sent] } : c));
+
+    if (demoMode) {
+      const responder = (activeConversation.kind === "group"
+        ? activeConversation.members.map((id) => employeeMap.get(id)).find((employee) => employee && employee.status !== "Paused")
+        : employeeMap.get(activeConversation.members[0])) ?? employees.find((employee) => employee.status !== "Paused");
+      if (!responder) { notify("No available demo employees are members of this conversation."); return; }
+      const asksForWork = /\b(plan|draft|write|research|prepare|analyse|analyze|report|build|create|design|audit|summari[sz]e|launch|compare)\b/i.test(text);
+      if (asksForWork) {
+        const title = text.length > 84 ? text.slice(0, 81).trimEnd() + "…" : text;
+        const job: Job = {
+          id: crypto.randomUUID(), title, description: text, employeeId: responder.id, status: "Submitted",
+          priority: "Normal", created: new Date().toISOString(), submittedAt: new Date().toISOString(),
+          createdBy: user?.id,
+          result: "# Demo deliverable\n\nThis is a simulated deliverable created to demonstrate the review workflow. No external AI service was called.\n\n## Request\n" + text + "\n\n## Suggested next steps\nReview the result, add revision feedback if needed, or approve it to complete the workflow."
+        };
+        setJobs((old) => [job, ...old]);
+        setEmployees((old) => old.map((employee) => employee.id === responder.id ? { ...employee, status: "Needs review", task: title } : employee));
+        const response: Message = { id: crypto.randomUUID(), from: responder.id, text: "[Demo] I’ve prepared a sample deliverable for “" + title + "”. It is ready for your review.", time: nowTime(), createdAt: new Date().toISOString(), jobId: job.id };
+        setConversations((old) => old.map((conversation) => conversation.id === activeConversation.id ? { ...conversation, messages: [...conversation.messages, response] } : conversation));
+        setSelectedJobId(job.id); setPage("Jobs & approvals"); setMobileContextOpen(false);
+        notify("Demo deliverable ready for review");
+      } else {
+        const response: Message = { id: crypto.randomUUID(), from: responder.id, text: "[Demo reply] I’ve taken the earlier conversation and sample assignments into account. In a live workspace, this response would come from the configured AI provider.", time: nowTime(), createdAt: new Date().toISOString() };
+        setConversations((old) => old.map((conversation) => conversation.id === activeConversation.id ? { ...conversation, messages: [...conversation.messages, response] } : conversation));
+      }
+      return;
+    }
 
     if (!settings.connectors.includes("OpenRouter")) { notify("Message saved. Enable OpenRouter in Settings to receive AI replies."); return; }
     if (!openRouterKey.trim()) { notify("Add your OpenRouter API key in Settings → Connectors first."); setPage("Settings"); setActiveSettings("Connectors"); return; }
@@ -461,6 +549,15 @@ export default function App() {
     }
   };
   const runJob = async (jobId: string, feedbackOverride?: string) => {
+    if (demoMode) {
+      const job = jobs.find((item) => item.id === jobId);
+      if (!job || busy) return;
+      const output = "# Demo deliverable: " + job.title + "\n\nThis is simulated output for the interactive demo. No external AI service was called.\n\n## Brief\n" + (job.description || "No additional brief supplied.") + "\n\n## Proposed result\n\n1. Confirm the intended outcome and audience.\n2. Prepare a first version that meets the brief.\n3. Review assumptions and revise before approving.\n\n## Review checklist\n\n- Does the result meet the brief?\n- Are assumptions and limitations explicit?\n- What would improve the next iteration?";
+      setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Submitted", result: output, submittedAt: new Date().toISOString() } : item));
+      setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Needs review", task: job.title } : employee));
+      setSelectedJobId(jobId); notify("Demo deliverable created — review the work");
+      return;
+    }
     if (!settings.connectors.includes("OpenRouter")) { notify("Enable OpenRouter in Settings before running AI jobs"); return; }
     if (!openRouterKey.trim()) { notify("Add your OpenRouter API key in Settings → Connectors first."); setPage("Settings"); setActiveSettings("Connectors"); return; }
     const job = jobs.find((j) => j.id === jobId);
@@ -486,12 +583,19 @@ export default function App() {
   const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
   const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress" } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
   const requestRevision = (jobId: string) => { if (!reviewNote.trim()) { notify("Add a note explaining what needs to change"); return; } setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Rejected", reviewNote: reviewNote.trim() } : j)); notify("Revision requested — feedback saved to the job"); };
-  const deleteJob = async (jobId: string) => { if (company) { const { error } = await supabase.from("jobs").delete().eq("id", jobId).eq("company_id", company.id); if (error) { notify("Could not delete job: " + error.message); return; } } setJobs((old) => old.filter((j) => j.id !== jobId)); setSelectedJobId((current) => current === jobId ? null : current); notify("Job deleted"); };
+  const deleteJob = async (jobId: string) => { if (company && !demoMode) { const { error } = await supabase.from("jobs").delete().eq("id", jobId).eq("company_id", company.id); if (error) { notify("Could not delete job: " + error.message); return; } } setJobs((old) => old.filter((j) => j.id !== jobId)); setSelectedJobId((current) => current === jobId ? null : current); notify(demoMode ? "Demo job removed for this session" : "Job deleted"); };
   const createCompany = async (event: FormEvent) => {
     event.preventDefault();
     if (!companyName.trim()) return;
     setAuthBusy(true);
     try {
+      if (demoMode) {
+        const name = companyName.trim();
+        const item: Company = { id: crypto.randomUUID(), name, industry: "Demo workspace", initials: initials(name), color: "blue", description: "Session-only demo workspace" };
+        setCompanies((old) => [item, ...old]); setCompanyName(""); setShowCompanyForm(false);
+        await openCompany(item); notify("Demo workspace created for this session");
+        return;
+      }
       // Read the current authenticated identity immediately before the insert so the
       // RLS ownership check uses the same user as the access token sent by Supabase.
       const { data: authData, error: authError } = await supabase.auth.getUser();
@@ -530,13 +634,15 @@ export default function App() {
     event.preventDefault();
     if (!company || !user || !goalTitle.trim()) return;
     const goal: Goal = { id: crypto.randomUUID(), title: goalTitle.trim(), description: goalDescription.trim(), progress: 0, dueDate: goalDueDate || undefined, status: "active", createdBy: user.id };
-    const { error } = await supabase.from("goals").insert({ id: goal.id, company_id: company.id, title: goal.title, description: goal.description, progress: 0, due_date: goal.dueDate ?? null, status: goal.status, created_by: user.id });
-    if (error) { notify("Could not create goal: " + error.message); return; }
+    if (!demoMode) {
+      const { error } = await supabase.from("goals").insert({ id: goal.id, company_id: company.id, title: goal.title, description: goal.description, progress: 0, due_date: goal.dueDate ?? null, status: goal.status, created_by: user.id });
+      if (error) { notify("Could not create goal: " + error.message); return; }
+    }
     setGoals((old) => [goal, ...old]); setGoalTitle(""); setGoalDescription(""); setGoalDueDate(""); setShowGoalForm(false); notify("Goal created");
   };
   const createInvite = async (event: FormEvent) => {
     event.preventDefault();
-    if (!company || !user || !inviteEmail.trim()) return;
+    if (demoMode || !company || !user || !inviteEmail.trim()) return;
     setInviteBusy(true);
     try {
       const random = crypto.getRandomValues(new Uint8Array(32));
@@ -568,11 +674,13 @@ export default function App() {
     const members = newChatMembers.length ? newChatMembers : employees[0] ? [employees[0].id] : [];
     const id = crypto.randomUUID();
     const chat: Conversation = { id, name: newChatName.trim(), kind: members.length > 1 ? "group" : "private", members, messages: [], createdBy: user.id };
-    const { error } = await supabase.from("conversations").insert({ id, company_id: company.id, name: chat.name, kind: chat.kind, created_by: user.id });
-    if (error) { notify("Could not create conversation: " + error.message); return; }
-    const membershipRows = [{ company_id: company.id, conversation_id: id, user_id: user.id, employee_id: null }, ...members.map((employeeId) => ({ company_id: company.id, conversation_id: id, user_id: null, employee_id: employeeId }))];
-    const { error: membershipError } = await supabase.from("conversation_members").insert(membershipRows);
-    if (membershipError) { notify("Conversation created, but members could not be added: " + membershipError.message); }
+    if (!demoMode) {
+      const { error } = await supabase.from("conversations").insert({ id, company_id: company.id, name: chat.name, kind: chat.kind, created_by: user.id });
+      if (error) { notify("Could not create conversation: " + error.message); return; }
+      const membershipRows = [{ company_id: company.id, conversation_id: id, user_id: user.id, employee_id: null }, ...members.map((employeeId) => ({ company_id: company.id, conversation_id: id, user_id: null, employee_id: employeeId }))];
+      const { error: membershipError } = await supabase.from("conversation_members").insert(membershipRows);
+      if (membershipError) { notify("Conversation created, but members could not be added: " + membershipError.message); }
+    }
     setConversations((old) => [chat, ...old]); setSelectedChat(id); setNewChatName(""); setNewChatMembers([]); setShowChatForm(false); setPage("Communication");
   };
   const openChatWith = async (id: string) => {
@@ -582,10 +690,12 @@ export default function App() {
       if (!company || !user) return;
       const e = employeeMap.get(id); const conversationId = crypto.randomUUID();
       const created: Conversation = { id: conversationId, name: e?.name ?? "Employee", kind: "private", members: [id], messages: [], createdBy: user.id };
-      const { error } = await supabase.from("conversations").insert({ id: conversationId, company_id: company.id, name: created.name, kind: "private", created_by: user.id });
-      if (error) { notify("Could not open conversation: " + error.message); return; }
-      const { error: membershipError } = await supabase.from("conversation_members").insert([{ company_id: company.id, conversation_id: conversationId, user_id: user.id, employee_id: null }, { company_id: company.id, conversation_id: conversationId, user_id: null, employee_id: id }]);
-      if (membershipError) { notify("Could not add conversation members: " + membershipError.message); return; }
+      if (!demoMode) {
+        const { error } = await supabase.from("conversations").insert({ id: conversationId, company_id: company.id, name: created.name, kind: "private", created_by: user.id });
+        if (error) { notify("Could not open conversation: " + error.message); return; }
+        const { error: membershipError } = await supabase.from("conversation_members").insert([{ company_id: company.id, conversation_id: conversationId, user_id: user.id, employee_id: null }, { company_id: company.id, conversation_id: conversationId, user_id: null, employee_id: id }]);
+        if (membershipError) { notify("Could not add conversation members: " + membershipError.message); return; }
+      }
       setConversations((old) => [created, ...old]); setSelectedChat(created.id);
     }
     setPage("Communication");
@@ -689,7 +799,7 @@ export default function App() {
               <button className="panel-footer-link" onClick={() => setShowJobForm(true)}><Plus size={15} /> Create a new job</button>
             </section>
             <section className="panel team-panel"><div className="panel-heading"><div><h2>Your team</h2><p>A quick look at your employees.</p></div><button className="text-button" onClick={() => changePage("Employees")}>All employees <ArrowUpRight size={14} /></button></div>
-              <div className="team-list">{employees.slice(0, 5).map((e) => <button className="team-person" key={e.id} onClick={() => { setSelectedEmployee(e.id); setPage("Employees"); }}><span className="avatar">{initials(e.name)}</span><span className="team-person-copy"><strong>{e.name}</strong><small>{e.role}</small></span><span className={"presence " + e.status.toLowerCase().replace(" ", "-")}><i />{e.status}</span></button>)}</div>
+              <div className="team-list">{employees.slice(0, 5).map((e) => <button className="team-person" key={e.id} onClick={() => { setSelectedEmployee(e.id); setPage("Management"); }}><span className="avatar">{initials(e.name)}</span><span className="team-person-copy"><strong>{e.name}</strong><small>{e.role}</small></span><span className={"presence " + e.status.toLowerCase().replace(" ", "-")}><i />{e.status}</span></button>)}</div>
             </section>
             <section className="panel goals-panel"><div className="panel-heading"><div><h2>Goals & progress</h2><p>Live goals saved to this workspace.</p></div><button className="icon-button subtle" onClick={() => setShowGoalForm(true)} title="Add goal"><Plus size={17} /></button></div>{goals.map((goal) => <div className="goal-item" key={goal.id}><div className="goal-top"><span className="goal-mark purple-mark"><ArrowUpRight size={14} /></span><div><strong>{goal.title}</strong><small>{goal.dueDate ? "Due " + goal.dueDate : goal.status}</small></div><b>{Math.round(goal.progress)}%</b></div><div className="goal-progress"><span style={{ width: goal.progress + "%" }} /></div><input className="goal-progress-input" type="range" min="0" max="100" step="5" value={goal.progress} aria-label={"Progress for " + goal.title} onChange={(e) => { const progress = Number(e.target.value); setGoals((old) => old.map((g) => g.id === goal.id ? { ...g, progress, status: progress === 100 ? "completed" : "active" } : g)); }} /></div>)}{goals.length === 0 && <div className="empty-state"><strong>No goals yet</strong><p>Add a measurable goal to track progress here.</p></div>}<button className="panel-footer-link" onClick={() => setShowGoalForm(true)}><Plus size={15} /> Add a goal</button></section>
             <section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Recent job updates from this workspace.</p></div><Clock3 size={16} className="muted-icon" /></div><div className="activity-list">{jobs.slice(0, 4).map((job) => <div className="activity-item" key={job.id}><span className="activity-bullet violet-bullet">{job.status === "Approved" ? <CheckCheck size={13} /> : <Inbox size={13} />}</span><div><p><strong>{job.title}</strong> · {job.status.toLowerCase()}</p><small>{new Date(job.created).toLocaleString()}</small></div></div>)}{jobs.length === 0 && <div className="empty-state">Job activity will appear here when you assign work.</div>}</div></section>
