@@ -674,11 +674,43 @@ export default function App() {
         ? manager
         : employees.find((candidate) => candidate.id !== emp.id && candidate.status !== "Paused" && candidate.deptId === emp.deptId)
           ?? employees.find((candidate) => candidate.id !== emp.id && candidate.status !== "Paused");
-      const prompt = "You are " + emp.name + ", " + emp.role + " in " + department + " at " + company?.name + ". Your manager is " + (manager?.name ?? "the company owner") + ". Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\n\nJOB: " + job.title + "\n\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\n\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\n\nProduce the actual deliverable, not a plan to do it. Use clear headings and concrete content. Address review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly.";
+      const room = await ensureCollaborationRoom();
+      const addWorkNote = (employeeId: string, text: string) => {
+        if (room) appendAgentMessages(room, [{ id: crypto.randomUUID(), from: employeeId, text, time: nowTime(), createdAt: new Date().toISOString(), jobId }]);
+      };
+      addWorkNote(emp.id, "Starting “" + job.title + "”. I’m breaking the brief into a deliverable, checking the acceptance criteria, and coordinating a supporting contribution before review.");
+      const colleagues = employees.filter((candidate) => candidate.id !== emp.id && candidate.status !== "Paused");
+      const contributor = colleagues.find((candidate) => candidate.id !== manager?.id && candidate.deptId === emp.deptId)
+        ?? colleagues.find((candidate) => candidate.id !== manager?.id)
+        ?? colleagues[0];
+      const reviewer = (manager && manager.id !== contributor?.id && manager.status !== "Paused" ? manager : undefined)
+        ?? colleagues.find((candidate) => candidate.id !== contributor?.id && candidate.status !== "Paused")
+        ?? (contributor?.id !== emp.id ? contributor : undefined);
+      const prompt = "You are " + emp.name + ", " + emp.role + " in " + department + " at " + company?.name + ". Your manager is " + (manager?.name ?? "the company owner") + ". Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\n\nJOB: " + job.title + "\n\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\n\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\n\nProduce the actual deliverable, not a plan to do it. Use clear headings and concrete content. Address review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly. Include a short ## Work note with a 2–3 sentence summary of your approach and decisions; do not expose private hidden chain-of-thought.";
       const draft = (await requestOpenRouter(modelFor(emp), [{ role: "user", content: prompt }], openRouterKey)).trim();
       if (!draft) throw new Error("The AI provider returned an empty deliverable.");
       let output = draft;
       let reviewFeedback = "";
+      if (contributor) {
+        addWorkNote(emp.id, "I have a first draft. I’m asking " + contributor.name + " (" + contributor.role + ") to contribute a specialist section so the final result is one coordinated piece of work.");
+        try {
+          const contribution = (await requestOpenRouter(modelFor(contributor), [
+            { role: "system", content: "You are " + contributor.name + ", " + contributor.role + " in " + departmentPath(contributor.deptId) + ". You are collaborating with " + emp.name + " on the SAME deliverable. Return a focused, useful contribution that can be incorporated into the shared document, not a separate deliverable. Explain assumptions briefly, avoid repeating the whole draft, and never invent company facts. Keep the contribution under 700 words." },
+            { role: "user", content: "SHARED JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nCURRENT DRAFT FROM " + emp.name + ":\n" + draft + "\n\nProvide the most valuable complementary section or improvements for this same deliverable." }
+          ], openRouterKey)).trim();
+          if (contribution) {
+            addWorkNote(contributor.id, "I’ve reviewed " + emp.name + "’s draft and contributed the following material to the shared deliverable:\n\n" + contribution.slice(0, 1400));
+            const integrated = (await requestOpenRouter(modelFor(emp), [
+              { role: "system", content: "You are " + emp.name + ", the accountable owner of this shared deliverable. Integrate the specialist contribution into your existing draft. Remove duplication, resolve conflicts, preserve useful content and return one cohesive final document in Markdown. Do not claim external actions. State assumptions and limitations clearly." },
+              { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nYOUR DRAFT:\n" + draft + "\n\nSPECIALIST CONTRIBUTION FROM " + contributor.name + " (" + contributor.role + "):\n" + contribution + "\n\nCreate one integrated deliverable, not two separate pieces." }
+            ], openRouterKey)).trim();
+            if (integrated) output = integrated;
+            addWorkNote(emp.id, "I’ve integrated " + contributor.name + "’s contribution into one document and removed duplicated points. I’m sending the combined version for review.");
+          }
+        } catch {
+          addWorkNote(emp.id, "I couldn’t get a usable contribution from " + contributor.name + " this round, so I’m continuing with the draft and noting that peer input was unavailable.");
+        }
+      }
       if (reviewer) {
         try {
           reviewFeedback = (await requestOpenRouter(modelFor(reviewer), [
@@ -702,22 +734,10 @@ export default function App() {
       setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Submitted", result: output, submittedAt } : item));
       setEmployees((old) => old.map((employee) => employee.id === emp.id ? { ...employee, status: "Needs review", task: job.title } : employee));
       if (reviewFeedback && reviewer) {
-        const collaborationMessages: Message[] = [
-          { id: crypto.randomUUID(), from: emp.id, text: "I have prepared a first draft for “" + job.title + "”. " + reviewer.name + ", could you review the gaps and acceptance criteria before I submit it?", time: nowTime(), createdAt: submittedAt, jobId },
-          { id: crypto.randomUUID(), from: reviewer.id, text: "Peer review for “" + job.title + "”:\n\n" + reviewFeedback.slice(0, 1800), time: nowTime(), createdAt: submittedAt, jobId },
-          { id: crypto.randomUUID(), from: emp.id, text: "I considered " + reviewer.name + "’s feedback, revised the deliverable and submitted it for your review.", time: nowTime(), createdAt: submittedAt, jobId }
-        ];
-        try {
-          const room = await ensureCollaborationRoom();
-          if (room) appendAgentMessages(room, collaborationMessages);
-        } catch (roomError) {
-          notify("Deliverable completed; collaboration log could not be saved: " + describeError(roomError, "Unknown error"));
-        }
+        addWorkNote(reviewer.id, "Reviewing the shared document against the brief. My checks are completeness, unsupported claims, and whether the acceptance criteria are met.\n\nReview notes for “" + job.title + "”:\n\n" + reviewFeedback.slice(0, 1800));
+        addWorkNote(emp.id, "I’ve considered " + reviewer.name + "’s review, made a revision pass, and submitted the integrated document for your review.");
       } else {
-        try {
-          const room = await ensureCollaborationRoom();
-          if (room) appendAgentMessages(room, [{ id: crypto.randomUUID(), from: emp.id, text: "I’ve completed the deliverable for “" + job.title + "”. Open the job to inspect the actual work before approving it.", time: nowTime(), createdAt: submittedAt, jobId }]);
-        } catch (roomError) { notify("Deliverable completed; collaboration log could not be saved: " + describeError(roomError, "Unknown error")); }
+        addWorkNote(emp.id, "The integrated deliverable is ready. I’ve recorded the collaboration steps; it is now awaiting your review.");
       }
       if (!background) { setSelectedJobId(jobId); notify("Deliverable created and submitted for review"); }
     } catch (error) {
