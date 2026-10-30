@@ -38,7 +38,7 @@ function configuredKeys(): string[] {
 function isSafeApiKey(key: string): boolean {
   // HTTP header values must be ASCII here. Reject whitespace, control characters,
   // and Unicode rather than allowing one malformed secret to break every request.
-  return /^[\\x21-\\x7E]+$/.test(key);
+  return /^[\x21-\x7E]+$/.test(key);
 }
 
 function orderedKeys(keys: string[]): string[] {
