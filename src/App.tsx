@@ -221,7 +221,8 @@ export default function App() {
   const [newEmployeeManager, setNewEmployeeManager] = useState("");
   const autoRunJobLockRef = useRef(false);
   const teamPulseLockRef = useRef(false);
-  const lastTeamPulseRef = useRef(0);
+  const lastTeamPulseRef = useRef("");
+  const teamChainRef = useRef(0);
   const collaborationRoomRef = useRef<Promise<Conversation | null> | null>(null);
   const [newChatName, setNewChatName] = useState("");
   const [newChatMembers, setNewChatMembers] = useState<string[]>([]);
@@ -550,9 +551,9 @@ export default function App() {
           "\\n\\nUse this as persistent working context. Remember decisions, preferences, commitments, previous results, and feedback; do not claim to remember anything outside this supplied history.";
       };
       const groupMembers = activeConversation.members.map((id) => employeeMap.get(id)).filter((emp): emp is Employee => Boolean(emp) && emp?.status !== "Paused");
-      // Limit each group turn to two colleagues; others can join when a later message needs their expertise.
+      // Every active member is invited to consider the message; each model independently chooses whether to contribute.
       const targets = activeConversation.kind === "group"
-        ? [...groupMembers.slice(activeConversation.messages.length % Math.max(1, groupMembers.length)), ...groupMembers.slice(0, activeConversation.messages.length % Math.max(1, groupMembers.length))].slice(0, 2)
+        ? groupMembers
         : activeConversation.members.length === 1
           ? [employeeMap.get(activeConversation.members[0])].filter((emp): emp is Employee => Boolean(emp))
           : [];
