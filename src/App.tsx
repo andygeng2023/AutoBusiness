@@ -91,7 +91,7 @@ const seedEmployees: Employee[] = [
   { id: "ella", name: "Ella Rossi", role: "Operations Manager", deptId: "operations", managerId: "maya", tone: "Practical & direct", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Prefer repeatable processes and concise checklists.", status: "Available" },
   { id: "jules", name: "Jules Park", role: "Product Designer", deptId: "design", managerId: "leo", tone: "Curious & collaborative", model: "meta-llama/llama-3.3-70b-instruct:free", instructions: "Explain trade-offs and design for accessibility.", status: "Available" }
 ];
-const defaultSettings: Settings = { approvalRequired: true, dailyLimit: 50, monthlyLimit: 900, autoRun: true, connectors: ["OpenRouter", "Supabase"] };
+const defaultSettings: Settings = { approvalRequired: true, dailyLimit: 50, monthlyLimit: 900, autoRun: true, connectors: ["ChatGPT (Playwright)", "Supabase"] };
 const demoCompany: Company = { id: "demo-company", name: "Northstar Studio", industry: "Creative services", initials: "NS", color: "blue", description: "Interactive sample workspace" };
 const makeDemoJobs = (): Job[] => {
   const now = Date.now();
@@ -120,7 +120,7 @@ const makeDemoGoals = (): Goal[] => [
   { id: "demo-goal-1", title: "Clarify our core positioning", description: "Validate the main value proposition with customers.", progress: 65, dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), status: "active" },
   { id: "demo-goal-2", title: "Make onboarding more consistent", description: "Document a simple first-week customer journey.", progress: 30, status: "active" }
 ];
-const fallbackFreeModels = [{ id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B (free)" }, { id: "google/gemma-3-27b-it:free", name: "Gemma 3 27B (free)" }, { id: "deepseek/deepseek-r1-0528:free", name: "DeepSeek R1 (free)" }];
+const fallbackFreeModels = [{ id: "chatgpt-web", name: "ChatGPT (Playwright browser)" }];
 const initials = (name: string) => name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 const nowTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const describeError = (error: unknown, fallback: string) => {
@@ -131,48 +131,28 @@ const describeError = (error: unknown, fallback: string) => {
   }
   return fallback;
 };
-const requestOpenRouter = async (model: string, messages: Array<{ role: string; content: string }>, onChunk?: (text: string) => void): Promise<string> => {
+const requestChatGPT = async (_model: string, messages: Array<{ role: string; content: string }>, onChunk?: (text: string) => void): Promise<string> => {
   const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError || !session?.access_token) throw new Error("Sign in again to use the server-side OpenRouter connection.");
-  const response = await fetch(`${supabaseUrl}/functions/v1/openrouter-proxy`, {
+  if (sessionError || !session?.access_token) throw new Error("Sign in again to use the ChatGPT browser connection.");
+  const response = await fetch(`${supabaseUrl}/functions/v1/chatgpt-playwright`, {
     method: "POST",
-    headers: {
-      "Authorization": "Bearer " + session.access_token,
-      "apikey": supabasePublishableKey,
-      "Content-Type": "application/json",
-      "X-Title": "AutoBusiness"
-    },
-    body: JSON.stringify({ model, messages, temperature: 0.4, stream: true })
+    headers: { "Authorization": "Bearer " + session.access_token, "apikey": supabasePublishableKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ messages })
   });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(payload?.error?.message || payload?.message || `OpenRouter proxy failed (${response.status})`);
-  }
-  if (!response.body) throw new Error("Streaming is unavailable for this response.");
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let result = "";
+  if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload?.error?.message || payload?.message || `ChatGPT browser service failed (${response.status})`); }
+  if (!response.body) throw new Error("The ChatGPT browser service returned no response stream.");
+  const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = "", result = "";
   const consumeFrame = (frame: string) => {
     const data = frame.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
     if (!data || data === "[DONE]") return;
-    try {
-      const payload = JSON.parse(data);
-      const delta = payload?.choices?.[0]?.delta?.content;
-      const token = typeof delta === "string" ? delta : Array.isArray(delta) ? delta.map((part: { text?: string }) => part?.text ?? "").join("") : "";
-      if (token) { result += token; onChunk?.(token); }
-    } catch { /* Ignore non-content SSE frames. */ }
+    const payload = JSON.parse(data);
+    const token = typeof payload?.choices?.[0]?.delta?.content === "string" ? payload.choices[0].delta.content : "";
+    if (token) { result += token; onChunk?.(token); }
+    if (payload?.error?.message) throw new Error(payload.error.message);
   };
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true }).replaceAll("\r\n", "\n");
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() ?? "";
-    frames.forEach(consumeFrame);
-  }
-  buffer += decoder.decode().replaceAll("\r\n", "\n");
-  if (buffer.trim()) consumeFrame(buffer);
+  while (true) { const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }).replaceAll("\r\n", "\n"); const frames = buffer.split("\n\n"); buffer = frames.pop() ?? ""; frames.forEach(consumeFrame); }
+  buffer += decoder.decode().replaceAll("\r\n", "\n"); if (buffer.trim()) consumeFrame(buffer);
+  if (!result.trim()) throw new Error("ChatGPT returned an empty response. Check the browser session and ChatGPT account.");
   return result;
 };
 
@@ -316,16 +296,11 @@ export default function App() {
   const [liveChatDrafts, setLiveChatDrafts] = useState<Record<string, string>>({});
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [activeSettings, setActiveSettings] = useState("General");
-  const [freeModels, setFreeModels] = useState(fallbackFreeModels);
-  const [modelsLoading, setModelsLoading] = useState(false);
+  const [freeModels] = useState(fallbackFreeModels);
+  const modelsLoading = false;
 
   useEffect(() => {
     let active = true;
-    setModelsLoading(true);
-    fetch("https://openrouter.ai/api/v1/models?filter=free").then((response) => { if (!response.ok) throw new Error("Could not load free models"); return response.json(); }).then((payload: { data?: Array<{ id?: string; name?: string; pricing?: { prompt?: string; completion?: string } }> }) => {
-      const models = (payload.data ?? []).filter((model) => model.id && model.id.endsWith(":free") && Number(model.pricing?.prompt ?? 1) === 0 && Number(model.pricing?.completion ?? 1) === 0).map((model) => ({ id: model.id!, name: (model.name || model.id!) + " (free)" })).sort((a, b) => a.name.localeCompare(b.name));
-      if (active && models.length) setFreeModels(models);
-    }).catch(() => { /* Keep only free fallback models if catalogue is unavailable. */ }).finally(() => { if (active) setModelsLoading(false); });
     supabase.auth.getSession().then(({ data, error }) => {
       if (!active) return;
       if (error) setAuthError(error.message);
@@ -378,7 +353,7 @@ export default function App() {
   }, [conversations, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
-    void supabase.from("workspace_settings").upsert({ company_id: company.id, approval_required: settings.approvalRequired, auto_run: settings.autoRun, daily_usage_limit: settings.dailyLimit, monthly_usage_limit: settings.monthlyLimit, enabled_connectors: settings.connectors.map((c) => (({ "OpenRouter": "openrouter" } as Record<string, string>)[c] ?? c.toLowerCase().replaceAll(" ", "_"))) }, { onConflict: "company_id" }).then(({ error }) => { if (error) notify("Settings save failed: " + error.message); });
+    void supabase.from("workspace_settings").upsert({ company_id: company.id, approval_required: settings.approvalRequired, auto_run: settings.autoRun, daily_usage_limit: settings.dailyLimit, monthly_usage_limit: settings.monthlyLimit, enabled_connectors: settings.connectors.map((c) => (({ "ChatGPT (Playwright)": "chatgpt_playwright" } as Record<string, string>)[c] ?? c.toLowerCase().replaceAll(" ", "_"))) }, { onConflict: "company_id" }).then(({ error }) => { if (error) notify("Settings save failed: " + error.message); });
   }, [settings, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
@@ -509,7 +484,7 @@ export default function App() {
       setSettings(dbSettings ? {
         approvalRequired: dbSettings.approval_required, autoRun: dbSettings.auto_run,
         dailyLimit: dbSettings.daily_usage_limit, monthlyLimit: dbSettings.monthly_usage_limit,
-        connectors: Array.from(new Set([...(dbSettings.enabled_connectors ?? ["openrouter"]).map((name: string) => (({ openrouter: "OpenRouter", supabase: "Supabase" } as Record<string, string>)[name] ?? name)), "Supabase"]))
+        connectors: Array.from(new Set([...(dbSettings.enabled_connectors ?? ["chatgpt_playwright"]).map((name: string) => (({ openrouter: "ChatGPT (Playwright)", chatgpt_playwright: "ChatGPT (Playwright)", supabase: "Supabase" } as Record<string, string>)[name] ?? name)), "Supabase"]))
       } : defaultSettings);
       setGoals((goalRes.data ?? []).map((row: any) => ({ id: row.id, title: row.title, description: row.description, progress: Number(row.progress), dueDate: row.due_date ?? undefined, status: row.status, createdBy: row.created_by })));
       setMemberRole(roleRes.data?.role ?? "member");
@@ -607,7 +582,7 @@ export default function App() {
       return;
     }
 
-    if (!settings.connectors.includes("OpenRouter")) { notify("Message saved. Enable OpenRouter in Settings to receive AI replies."); return; }
+    if (!settings.connectors.includes("ChatGPT (Playwright)")) { notify("Message saved. Enable ChatGPT in Settings to receive AI replies."); return; }
 
     setBusy(true);
     try {
@@ -663,7 +638,7 @@ export default function App() {
           const draftKey = activeConversation.id + ":" + emp.id;
           let rawStream = "";
           setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
-          const raw = await requestOpenRouter(model, prompt, (chunk) => {
+          const raw = await requestChatGPT(model, prompt, (chunk) => {
             rawStream += chunk;
             const visible = visibleEmployeeText(rawStream);
             if (visible) setLiveChatDrafts((old) => ({ ...old, [draftKey]: visible }));
@@ -679,7 +654,7 @@ export default function App() {
               { role: "user", content: workspaceMemoryFor(emp) + "\\n\\nASSIGNMENT: " + job.title + "\\nBRIEF: " + job.description + "\\n\nCURRENT CHAT CONTEXT:\\n" + dialogue + "\\n\\nUSER'S LATEST REQUEST: " + text + "\\n\\nProduce the deliverable now, not a plan." }
             ];
             let deliverableStream = "";
-            const rawDeliverable = await requestOpenRouter(model, workPrompt, (chunk) => {
+            const rawDeliverable = await requestChatGPT(model, workPrompt, (chunk) => {
               deliverableStream += chunk;
               const visible = visibleEmployeeText(deliverableStream);
               setJobs((old) => old.map((item) => item.id === job.id ? { ...item, result: visible } : item));
@@ -695,7 +670,7 @@ export default function App() {
           if (decision.action === "ignore") return { emp, answer: "[[NO_REPLY]]", error: "", jobId: undefined, respondedAt: undefined, respondedTime: undefined };
           return { emp, answer: (decision.reply || raw).trim(), error: "", jobId: undefined, respondedAt: new Date().toISOString(), respondedTime: nowTime() };
         } catch (error) {
-          return { emp, answer: "", error: describeError(error, "Unknown OpenRouter error"), jobId: undefined, respondedAt: undefined, respondedTime: undefined };
+          return { emp, answer: "", error: describeError(error, "Unknown ChatGPT browser error"), jobId: undefined, respondedAt: undefined, respondedTime: undefined };
         }
       }));
 
@@ -715,15 +690,15 @@ export default function App() {
         notify("Some AI replies failed: " + summary);
       }
       if (activeConversation.kind === "private" && !responses.length && !failures.length) {
-        throw new Error("OpenRouter returned an empty reply. Check the selected model and your OpenRouter account.");
+        throw new Error("ChatGPT returned an empty reply. Check the Playwright worker and authenticated ChatGPT session.");
       }
     } catch (error) {
-      const reason = describeError(error, "Unknown OpenRouter error");
+      const reason = describeError(error, "Unknown ChatGPT error");
       const detail = /popup_blocked/i.test(reason)
-        ? "OpenRouter sign-in popup was blocked. Allow pop-ups for this site, then send your message again."
+        ? "The ChatGPT browser session could not be opened. Check the Playwright worker and its authentication state."
         : /auth_window_closed/i.test(reason)
-          ? "OpenRouter sign-in was cancelled. Sign in to OpenRouter to receive AI replies."
-          : "OpenRouter request failed: " + reason;
+          ? "The ChatGPT browser session is not authenticated. Refresh its stored session on the Playwright worker."
+          : "ChatGPT browser request failed: " + reason;
       setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: "system", text: detail + " Your original message is saved.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
     } finally {
       setLiveChatDrafts({});
@@ -785,7 +760,7 @@ export default function App() {
       setSelectedJobId(jobId); notify("Demo deliverable created — review the work");
       return;
     }
-    if (!settings.connectors.includes("OpenRouter")) { if (!background) notify("Enable OpenRouter in Settings before running AI jobs"); return; }
+    if (!settings.connectors.includes("ChatGPT (Playwright)")) { if (!background) notify("Enable ChatGPT in Settings before running AI jobs"); return; }
     if (!background && autoRunJobLockRef.current) { notify("A background agent is already working on a job."); return; }
     if (!background && busy) return;
     const job = jobs.find((item) => item.id === jobId);
@@ -806,7 +781,7 @@ export default function App() {
         let streamed = "";
         if (draftKey) setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
         try {
-          const rawOutput = await requestOpenRouter(modelFor(employee), messages, (chunk) => {
+          const rawOutput = await requestChatGPT(modelFor(employee), messages, (chunk) => {
             streamed += chunk;
             const visible = visibleEmployeeText(streamed);
             if (draftKey) setLiveChatDrafts((old) => ({ ...old, [draftKey]: visible }));
@@ -886,7 +861,7 @@ export default function App() {
       }
       if (!background) { setSelectedJobId(jobId); notify("Deliverable created and submitted for review"); }
     } catch (error) {
-      const reason = describeError(error, "Unknown OpenRouter error");
+      const reason = describeError(error, "Unknown ChatGPT error");
       if (!background) notify("AI job failed: " + reason);
       else {
         setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Queued", updatedAt: new Date().toISOString() } : item));
@@ -896,7 +871,7 @@ export default function App() {
     } finally { if (!background) setBusy(false); }
   };
   useEffect(() => {
-    if (demoMode || !user || !company || loadedCompanyId !== company.id || !settings.connectors.includes("OpenRouter")) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id || !settings.connectors.includes("ChatGPT (Playwright)")) return;
     if (busy || autoRunJobLockRef.current || teamPulseLockRef.current) return;
 
     const nextJob = settings.autoRun ? jobs.filter((job) => job.status === "In progress").sort((a, b) =>
@@ -1030,7 +1005,7 @@ export default function App() {
           setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
           let response = "";
           try {
-            response = await requestOpenRouter(model, prompt, (chunk) => {
+            response = await requestChatGPT(model, prompt, (chunk) => {
               streamed += chunk;
               const visible = streamed.trimStart();
               if (!"[[NO_REPLY]]".startsWith(visible)) {
@@ -1341,7 +1316,7 @@ export default function App() {
             {!jobs.some((job) => job.employeeId === activeEmployee.id && ["Queued", "In progress", "Submitted"].includes(job.status)) && <p className="no-open-jobs">No open jobs assigned.</p>}
             <div className="detail-section-title">AI CONFIGURATION</div><label className="field-label">Department<select value={activeEmployee.deptId} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, deptId: e.target.value } : x))}>{depts.map((d) => <option key={d.id} value={d.id}>{departmentPath(d.id)}</option>)}</select></label><label className="field-label">Reports to<select value={activeEmployee.managerId ?? "__none__"} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, managerId: e.target.value === "__none__" ? undefined : e.target.value } : x))}><option value="__none__">You · top of hierarchy</option>{employees.filter((person) => person.id !== activeEmployee.id && !isEmployeeDescendant(person.id, activeEmployee.id)).map((person) => <option key={person.id} value={person.id}>{person.name} — {person.role}</option>)}</select></label>
             <label className="field-label">Communication tone<select value={activeEmployee.tone} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, tone: e.target.value } : x))}><option>Clear & concise</option><option>Thoughtful & creative</option><option>Warm & articulate</option><option>Analytical</option><option>Practical & direct</option><option>Curious & collaborative</option><option>Formal</option><option>Friendly</option></select></label>
-            <label className="field-label">AI model<select value={freeModels.some((item) => item.id === activeEmployee.model) ? activeEmployee.model : freeModels[0]?.id ?? fallbackFreeModels[0].id} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, model: e.target.value } : x))}>{freeModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select><small className="input-help">{modelsLoading ? "Loading current free model catalogue…" : "Only models with zero prompt and completion pricing are listed."}</small></label>
+            <label className="field-label">AI model<select value="chatgpt-web" disabled><option value="chatgpt-web">ChatGPT (Playwright browser)</option></select><small className="input-help">All employees use the authenticated ChatGPT browser session.</small></label>
             <label className="field-label">Custom instructions<textarea rows={4} value={activeEmployee.instructions} onChange={(e) => setEmployees((old) => old.map((x) => x.id === activeEmployee.id ? { ...x, instructions: e.target.value } : x))} placeholder="How should this employee work?" /></label>
             <div className="detail-note"><ShieldCheck size={15} /><span>{demoMode ? "Changes are temporary and stay in this session." : "Changes are saved to your cloud workspace."}</span></div>
           </section>}
@@ -1366,26 +1341,23 @@ export default function App() {
           {activeSettings === "Rulesets" && <><h2>Rulesets</h2><p className="settings-intro">Company-wide guardrails applied to every employee.</p><div className="rule-card"><span className="rule-icon"><ShieldCheck size={17} /></span><div><strong>Human approval for consequential actions</strong><small>Publishing, sending messages externally, spending and deleting data require confirmation.</small></div><span className="setting-pill green-pill">Enabled</span></div><div className="rule-card"><span className="rule-icon"><LockKeyhole size={17} /></span><div><strong>Keep company data private</strong><small>Employees should only use the context required for their assigned work.</small></div><span className="setting-pill green-pill">Enabled</span></div><div className="rule-card"><span className="rule-icon"><CheckCheck size={17} /></span><div><strong>Require evidence in submissions</strong><small>Ask employees to include the result, relevant links and unresolved issues.</small></div><span className="setting-pill green-pill">Enabled</span></div></>}
           {activeSettings === "Connectors" && <>
             <h2>AI provider & connectors</h2>
-            <p className="settings-intro">Only models with zero prompt and completion prices are offered.</p>
-            {demoMode ? <div className="demo-connector-notice"><Sparkles size={16} /><div><strong>Provider connections are simulated in demo mode</strong><p>No API key is read, saved, or used for demo replies and sample deliverables. Sign in to configure an AI provider for real work.</p></div></div> : <><div className="openrouter-key-card">
-              <p className="small-disclaimer">OpenRouter credentials are held in Supabase Edge Function secrets and never stored in this browser. The server rotates through configured keys after rate-limit responses and streams replies directly to the app.</p>
+            <p className="settings-intro">AI responses are generated through an authenticated ChatGPT browser session managed by Playwright.</p>
+            {demoMode ? <div className="demo-connector-notice"><Sparkles size={16} /><div><strong>Provider connections are simulated in demo mode</strong><p>No API key is read, saved, or used for demo replies and sample deliverables. Sign in to configure an AI provider for real work.</p></div></div> : <><div className="chatgpt-browser-card">
+              <p className="small-disclaimer">The signed-in ChatGPT browser session stays on the Playwright server and is never exposed to the frontend or stored in workspace settings.</p>
               <div className="settings-info-row">
-                <div><strong>OpenRouter server connection</strong><small>Keys are managed securely in the Supabase project, not on individual devices.</small></div>
-                <button className={"connector-action " + (settings.connectors.includes("OpenRouter") ? "enabled" : "")} onClick={() => setSettings((old) => ({ ...old, connectors: old.connectors.includes("OpenRouter") ? old.connectors.filter((x) => x !== "OpenRouter") : [...old.connectors, "OpenRouter"] }))}>{settings.connectors.includes("OpenRouter") ? "Enabled" : "Enable"}</button>
+                <div><strong>ChatGPT browser connection</strong><small>Configure the Playwright service URL, access token and ChatGPT browser session in the hosting environment.</small></div>
+                <button className={"connector-action " + (settings.connectors.includes("ChatGPT (Playwright)") ? "enabled" : "")} onClick={() => setSettings((old) => ({ ...old, connectors: old.connectors.includes("ChatGPT (Playwright)") ? old.connectors.filter((x) => x !== "ChatGPT (Playwright)") : [...old.connectors, "ChatGPT (Playwright)"] }))}>{settings.connectors.includes("ChatGPT (Playwright)") ? "Enabled" : "Enable"}</button>
               </div>
-              <div className="settings-info-row">
-                <div><strong>Free model catalogue</strong><small>{modelsLoading ? "Refreshing model list…" : freeModels.length + " zero-priced models listed."}</small></div>
-                <button className="secondary-button compact-button" onClick={() => { setModelsLoading(true); fetch("https://openrouter.ai/api/v1/models?filter=free").then((response) => response.json()).then((payload: { data?: Array<{ id?: string; name?: string; pricing?: { prompt?: string; completion?: string } }> }) => { const models = (payload.data ?? []).filter((model) => model.id && model.id.endsWith(":free") && Number(model.pricing?.prompt ?? 1) === 0 && Number(model.pricing?.completion ?? 1) === 0).map((model) => ({ id: model.id!, name: (model.name || model.id!) + " (free)" })).sort((a, b) => a.name.localeCompare(b.name)); if (models.length) setFreeModels(models); }).catch(() => notify("Could not refresh free models; keeping the last loaded list.")).finally(() => setModelsLoading(false)); }}>Refresh models</button>
-              </div>
+              <div className="settings-info-row"><div><strong>Model selection</strong><small>Uses the model selected in the authenticated ChatGPT account.</small></div><span className="setting-pill">ChatGPT</span></div>
             </div></>}
             <div className="connector-row"><span className="connector-icon"><Zap size={17} /></span><div><strong>Supabase</strong><small>{demoMode ? "Cloud storage is bypassed in this session." : "Database and authentication for this workspace."}</small></div>{demoMode ? <span className="setting-pill">Demo only</span> : <button className="connector-action enabled" disabled><Check size={13} /> Connected</button>}</div>
-          </>}{activeSettings === "Automation & limits" && <><h2>Automation & usage limits</h2><p className="settings-intro">Control autonomous work, the approval gate and usage limits. Background agents run while this workspace is open and connected.</p><div className="setting-toggle-row"><div><strong>Always-on team collaboration</strong><small>{demoMode ? "Demo mode does not make external AI calls." : !settings.autoRun ? "Agents are paused. Turn this on to run eligible jobs and coordinate around active work." : !settings.connectors.includes("OpenRouter") ? "Enabled, but OpenRouter is disabled in Connectors." : "Agents are monitoring in-progress jobs and periodically coordinating in the Team collaboration chat."}</small></div><button className={"toggle " + (settings.autoRun ? "on" : "")} role="switch" aria-checked={settings.autoRun} aria-label="Always-on team collaboration" onClick={() => setSettings((old) => ({ ...old, autoRun: !old.autoRun }))}><span /></button></div><div className="setting-toggle-row"><div><strong>Require approval before jobs start</strong><small>{settings.approvalRequired ? "New assignments wait in the queue until you start them. Running jobs can still receive background assistance." : "New assignments start immediately and are picked up by the background team when a provider is configured."}</small></div><button className={"toggle " + (settings.approvalRequired ? "on" : "")} role="switch" aria-checked={settings.approvalRequired} aria-label="Require approval before jobs start" onClick={() => setSettings((old) => ({ ...old, approvalRequired: !old.approvalRequired }))}><span /></button></div><label className="field-label">Daily job creation limit<input type="number" min="1" max="10000" value={settings.dailyLimit} onChange={(e) => setSettings({ ...settings, dailyLimit: Math.max(1, Number(e.target.value)) })} /></label><label className="field-label">Monthly job creation limit<input type="number" min="1" max="100000" value={settings.monthlyLimit} onChange={(e) => setSettings({ ...settings, monthlyLimit: Math.max(1, Number(e.target.value)) })} /></label><div className="usage-summary"><div className="usage-summary-top"><span>Deliverables with results</span><strong>{jobs.filter((j) => Boolean(j.result?.trim())).length} / {jobs.length}</strong></div><div className="usage-track"><span style={{ width: (jobs.length ? jobs.filter((j) => Boolean(j.result?.trim())).length / jobs.length * 100 : 0) + "%" }} /></div></div><p className="small-disclaimer">Provider token usage and billing are not exposed by the current browser AI integration. These figures count saved deliverables, not billable tokens.</p></>}
+          </>}{activeSettings === "Automation & limits" && <><h2>Automation & usage limits</h2><p className="settings-intro">Control autonomous work, the approval gate and usage limits. Background agents run while this workspace is open and connected.</p><div className="setting-toggle-row"><div><strong>Always-on team collaboration</strong><small>{demoMode ? "Demo mode does not make external AI calls." : !settings.autoRun ? "Agents are paused. Turn this on to run eligible jobs and coordinate around active work." : !settings.connectors.includes("ChatGPT (Playwright)") ? "Enabled, but ChatGPT is disabled in Connectors." : "Agents are monitoring in-progress jobs and periodically coordinating in the Team collaboration chat."}</small></div><button className={"toggle " + (settings.autoRun ? "on" : "")} role="switch" aria-checked={settings.autoRun} aria-label="Always-on team collaboration" onClick={() => setSettings((old) => ({ ...old, autoRun: !old.autoRun }))}><span /></button></div><div className="setting-toggle-row"><div><strong>Require approval before jobs start</strong><small>{settings.approvalRequired ? "New assignments wait in the queue until you start them. Running jobs can still receive background assistance." : "New assignments start immediately and are picked up by the background team when a provider is configured."}</small></div><button className={"toggle " + (settings.approvalRequired ? "on" : "")} role="switch" aria-checked={settings.approvalRequired} aria-label="Require approval before jobs start" onClick={() => setSettings((old) => ({ ...old, approvalRequired: !old.approvalRequired }))}><span /></button></div><label className="field-label">Daily job creation limit<input type="number" min="1" max="10000" value={settings.dailyLimit} onChange={(e) => setSettings({ ...settings, dailyLimit: Math.max(1, Number(e.target.value)) })} /></label><label className="field-label">Monthly job creation limit<input type="number" min="1" max="100000" value={settings.monthlyLimit} onChange={(e) => setSettings({ ...settings, monthlyLimit: Math.max(1, Number(e.target.value)) })} /></label><div className="usage-summary"><div className="usage-summary-top"><span>Deliverables with results</span><strong>{jobs.filter((j) => Boolean(j.result?.trim())).length} / {jobs.length}</strong></div><div className="usage-track"><span style={{ width: (jobs.length ? jobs.filter((j) => Boolean(j.result?.trim())).length / jobs.length * 100 : 0) + "%" }} /></div></div><p className="small-disclaimer">Provider token usage and billing are not exposed by the ChatGPT browser integration. These figures count saved deliverables, not billable tokens.</p></>}
         </section></div></div>}
       </main>
     </div>
     {mobileContextOpen && <button type="button" className="sidebar-scrim" aria-label="Close contextual navigation" onClick={() => setMobileContextOpen(false)} />}
     {toast && <div className="toast"><Check size={15} />{toast}</div>}
-    {showHelp && <div className="modal-backdrop" onClick={() => setShowHelp(false)}><section className="modal help-modal" role="dialog" aria-modal="true" aria-labelledby="help-modal-title" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setShowHelp(false)} aria-label="Close help">×</button><span className="modal-kicker"><CircleHelp size={14} /> QUICK GUIDE</span><h2 id="help-modal-title">How AutoBusiness works</h2><div className="help-step"><strong>1. Talk to your team</strong><p>Private and group conversations share relevant workspace chat and assignment context with participating employees.</p></div><div className="help-step"><strong>2. Delegate meaningful work</strong><p>Employees can choose to reply or open an assignment. New assignments appear in Jobs & approvals.</p></div><div className="help-step"><strong>3. Review before approving</strong><p>Open submitted work, request a revision with feedback, or approve it to complete the job.</p></div><div className="help-step"><strong>4. Configure access carefully</strong><p>Provider keys are stored in this browser. Autonomous agents require an OpenRouter key and run while the authenticated workspace remains open; they pause when the page is closed. True server-side 24/7 operation needs a separately deployed background worker.</p></div><div className="work-modal-actions"><button className="primary-button" onClick={() => setShowHelp(false)}>Got it</button><button className="secondary-button" onClick={() => { setShowHelp(false); changePage("Settings"); }}>Open settings</button></div></section></div>}
+    {showHelp && <div className="modal-backdrop" onClick={() => setShowHelp(false)}><section className="modal help-modal" role="dialog" aria-modal="true" aria-labelledby="help-modal-title" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setShowHelp(false)} aria-label="Close help">×</button><span className="modal-kicker"><CircleHelp size={14} /> QUICK GUIDE</span><h2 id="help-modal-title">How AutoBusiness works</h2><div className="help-step"><strong>1. Talk to your team</strong><p>Private and group conversations share relevant workspace chat and assignment context with participating employees.</p></div><div className="help-step"><strong>2. Delegate meaningful work</strong><p>Employees can choose to reply or open an assignment. New assignments appear in Jobs & approvals.</p></div><div className="help-step"><strong>3. Review before approving</strong><p>Open submitted work, request a revision with feedback, or approve it to complete the job.</p></div><div className="help-step"><strong>4. Configure access carefully</strong><p>The ChatGPT session is held by the separately deployed Playwright worker. Employee automation runs while this workspace is open; the worker itself can remain online independently.</p></div><div className="work-modal-actions"><button className="primary-button" onClick={() => setShowHelp(false)}>Got it</button><button className="secondary-button" onClick={() => { setShowHelp(false); changePage("Settings"); }}>Open settings</button></div></section></div>}
     {profileEmployeeId && (() => { const person = employeeMap.get(profileEmployeeId); if (!person) return null; return <div className="modal-backdrop" onClick={() => setProfileEmployeeId(null)}><section className="modal employee-quick-profile" role="dialog" aria-modal="true" aria-labelledby="quick-profile-title" onClick={(e) => e.stopPropagation()}><button type="button" className="modal-close" onClick={() => setProfileEmployeeId(null)} aria-label="Close employee profile">×</button><div className="employee-profile-head"><div className="avatar large">{initials(person.name)}</div><div className="employee-profile-title"><h2 id="quick-profile-title">{person.name}</h2><p>{person.role}</p><span className={"presence " + person.status.toLowerCase().replace(" ", "-")}><i />{person.status}</span></div></div><div className="detail-divider" /><div className="detail-section-title">DEPARTMENT</div><p className="profile-value">{departmentPath(person.deptId)}</p><div className="detail-section-title">REPORTING LINE</div><p className="profile-value">Reports to {managerNameFor(person.managerId)}</p>{employees.filter((employee) => employee.managerId === person.id).length > 0 && <><div className="detail-section-title">DIRECT REPORTS</div>{employees.filter((employee) => employee.managerId === person.id).map((employee) => <button className="profile-report-row" key={employee.id} onClick={() => setProfileEmployeeId(employee.id)}><span className="avatar tiny">{initials(employee.name)}</span><span><strong>{employee.name}</strong><small>{employee.role}</small></span><ChevronRight size={14} /></button>)}</>}<div className="detail-section-title">CURRENT WORK</div><p className="profile-value">{person.task || "No active task"}</p><div className="detail-section-title">OPEN JOBS</div>{jobs.filter((j) => j.employeeId === person.id && ["Queued", "In progress", "Submitted"].includes(j.status)).map((j) => <div className="employee-job-mini" key={j.id}><span className="employee-job-copy"><strong>{j.title}</strong><small>{j.status}</small></span></div>)}{!jobs.some((j) => j.employeeId === person.id && ["Queued", "In progress", "Submitted"].includes(j.status)) && <p className="profile-value">No open jobs.</p>}<div className="work-modal-actions"><button className="secondary-button" onClick={() => setProfileEmployeeId(null)}>Close</button><button className="primary-button" onClick={() => { setProfileEmployeeId(null); setSelectedEmployee(person.id); setPage("Management"); }}><Users size={14} /> Open full profile</button><button className="secondary-button" onClick={() => { setProfileEmployeeId(null); setPage("Communication"); setMobileContextOpen(false); void openChatWith(person.id); }}>Open chat</button></div></section></div>; })()}
     {selectedJobId && (() => { const j = jobs.find((item) => item.id === selectedJobId); if (!j) return null; const emp = employeeMap.get(j.employeeId); return <div className="review-page-backdrop" onClick={() => setSelectedJobId(null)}><section className="review-page" role="dialog" aria-modal="true" aria-labelledby="work-modal-title" onClick={(e) => e.stopPropagation()}><header className="review-page-header"><div><span className="modal-kicker"><Inbox size={14} /> DELIVERABLE REVIEW</span><h1 id="work-modal-title">{j.title}</h1><p>Assigned to {emp?.name ?? "Unassigned"} · {j.status} · {j.priority}{j.submittedAt ? " · Submitted " + new Date(j.submittedAt).toLocaleString() : ""}</p></div><button type="button" className="review-close-button" onClick={() => setSelectedJobId(null)} aria-label="Close work review">×</button></header><div className="review-page-scroll"><div className="review-layout"><main className="review-document"><div className="review-document-top"><span>DOCUMENT PREVIEW</span><span>Markdown</span></div>{j.description && <div className="work-job-brief"><strong>Job brief</strong><p>{j.description}</p></div>}{j.status === "Rejected" && j.reviewNote && <div className="review-feedback"><strong>Requested changes</strong><p>{j.reviewNote}</p></div>}<article className="work-result">{j.result?.trim() ? <MarkdownPreview content={j.result} /> : <p>No deliverable has been generated yet. Start the job and generate work before reviewing or approving it.</p>}</article></main><aside className="review-sidebar"><h2>Review details</h2><div className="review-side-row"><span>Owner</span><strong>{emp?.name ?? "Unassigned"}</strong></div><div className="review-side-row"><span>Status</span><strong>{j.status}</strong></div><div className="review-side-row"><span>Priority</span><strong>{j.priority}</strong></div><div className="review-side-row"><span>Created</span><strong>{new Date(j.created).toLocaleDateString()}</strong></div>{j.status === "Submitted" && <label className="review-note-field">Revision feedback (required to send back)<textarea rows={5} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Explain what needs to change, with specific, actionable feedback." /></label>}{j.status === "Rejected" && <label className="review-note-field">Update revision feedback<textarea rows={5} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="What should the employee change?" /></label>}</aside></div></div><footer className="review-page-footer"><button className="secondary-button" onClick={() => setSelectedJobId(null)}>Close</button>{j.status === "In progress" && <button className="primary-button" disabled={busy} onClick={() => void runJob(j.id)}>{busy ? "Generating…" : "Generate work"}</button>}{j.status === "Rejected" && <button className="primary-button" disabled={busy} onClick={() => { setJobs((old) => old.map((x) => x.id === j.id ? { ...x, status: "In progress", reviewNote: reviewNote.trim() || x.reviewNote, updatedAt: new Date().toISOString() } : x)); void runJob(j.id, reviewNote.trim() || j.reviewNote); }}>{busy ? "Generating…" : "Regenerate work"}</button>}{j.status === "Submitted" && <><button className="secondary-button" onClick={() => requestRevision(j.id)}>Request revision</button><button className="primary-button" disabled={!j.result?.trim()} onClick={() => { if (j.result?.trim()) { approveJob(j.id); setSelectedJobId(null); } }}><Check size={14} /> Approve reviewed work</button></>}</footer></section></div>; })()}
     {showJobForm && <div className="modal-backdrop" onClick={() => setShowJobForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createJob}><button type="button" className="modal-close" onClick={() => setShowJobForm(false)}>×</button><span className="modal-kicker"><Inbox size={14} /> JOB ASSIGNMENT</span><h2>Assign a job</h2><p>Give an employee a clear outcome to work towards.</p><label>Job title<input autoFocus value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} placeholder="e.g. Draft a launch plan" minLength={2} maxLength={240} required /></label><label>Job brief / acceptance criteria<textarea rows={4} value={jobDescription} onChange={(e) => setJobDescription(e.target.value)} maxLength={8000} placeholder="Describe the expected deliverable, audience, constraints, and what a successful result includes." /></label><label>Priority<select value={jobPriority} onChange={(e) => setJobPriority(e.target.value as "Normal" | "Urgent")}><option>Normal</option><option>Urgent</option></select></label><label>Assign to<select value={jobEmployee} onChange={(e) => setJobEmployee(e.target.value)}>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}</select></label><div className="modal-note"><ShieldCheck size={15} />{settings.approvalRequired ? "This job will be queued for approval before it can start." : "This job will start without the approval gate; AI generation still requires a manual action."}</div><button className="primary-button modal-submit" type="submit">Create job <ArrowUpRight size={15} /></button></form></div>}
