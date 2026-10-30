@@ -132,30 +132,29 @@ const requestOpenRouter = async (model: string, messages: Array<{ role: string; 
   const decoder = new TextDecoder();
   let buffer = "";
   let result = "";
+  const consumeFrame = (frame: string) => {
+    const data = frame.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
+    if (!data || data === "[DONE]") return;
+    try {
+      const payload = JSON.parse(data);
+      const delta = payload?.choices?.[0]?.delta?.content;
+      const token = typeof delta === "string" ? delta : Array.isArray(delta) ? delta.map((part: { text?: string }) => part?.text ?? "").join("") : "";
+      if (token) { result += token; onChunk?.(token); }
+    } catch { /* Ignore non-content SSE frames. */ }
+  };
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+    buffer += decoder.decode(value, { stream: true }).replaceAll("\r\n", "\n");
     const frames = buffer.split("\n\n");
     buffer = frames.pop() ?? "";
-    for (const frame of frames) {
-      const data = frame.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
-      if (!data || data === "[DONE]") continue;
-      try {
-        const payload = JSON.parse(data);
-        const delta = payload?.choices?.[0]?.delta?.content;
-        const token = typeof delta === "string" ? delta : Array.isArray(delta) ? delta.map((part: { text?: string }) => part?.text ?? "").join("") : "";
-        if (token) { result += token; onChunk?.(token); }
-      } catch { /* Ignore non-content SSE frames. */ }
-    }
+    frames.forEach(consumeFrame);
   }
+  buffer += decoder.decode().replaceAll("\r\n", "\n");
+  if (buffer.trim()) consumeFrame(buffer);
   return result;
 };
-const partialJsonField = (source: string, field: string) => {
-  const match = source.match(new RegExp('"' + field + '"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)'));
-  if (!match) return "";
-  try { return JSON.parse('"' + match[1] + '"'); } catch { return match[1].replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\"/g, '"'); }
-};
+
 
 declare global { interface Window {} }
 
@@ -583,8 +582,10 @@ export default function App() {
           const raw = await requestOpenRouter(model, prompt, openRouterKey, (chunk) => {
             rawStream += chunk;
             const trimmed = rawStream.trimStart();
-            const markerEnd = trimmed.startsWith("[[START_JOB") ? trimmed.indexOf("]]") : -1;
-            const visible = markerEnd >= 0 ? trimmed.slice(markerEnd + 2).trimStart() : trimmed.startsWith("[[NO_REPLY]]") ? "" : trimmed;
+            const isStartJob = trimmed.startsWith("[[START_JOB");
+            const markerEnd = isStartJob ? trimmed.indexOf("]]") : -1;
+            const isNoReplyPrefix = "[[NO_REPLY]]".startsWith(trimmed);
+            const visible = isStartJob ? markerEnd >= 0 ? trimmed.slice(markerEnd + 2).trimStart() : "" : isNoReplyPrefix ? "" : trimmed;
             if (visible) setLiveChatDrafts((old) => ({ ...old, [draftKey]: visible }));
           });
           const trimmedRaw = raw.trimStart();
