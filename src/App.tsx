@@ -59,7 +59,7 @@ function MarkdownPreview({ content }: { content: string }) {
 
 type Employee = { id: string; name: string; role: string; deptId: string; managerId?: string; tone: string; model: string; instructions: string; status: "Available" | "Working" | "Needs review" | "Paused"; task?: string };
 type Dept = { id: string; name: string; parentId?: string };
-type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string; reviewedBy?: string };
+type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; updatedAt?: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string; reviewedBy?: string };
 type Message = { id: string; from: string; text: string; time: string; jobId?: string; createdAt?: string; senderUserId?: string };
 type Conversation = { id: string; name: string; kind: "private" | "group"; members: string[]; messages: Message[]; createdBy?: string };
 type Company = { id: string; name: string; industry: string; initials: string; color: string; description: string };
@@ -121,14 +121,104 @@ const describeError = (error: unknown, fallback: string) => {
   }
   return fallback;
 };
-const requestOpenRouter = async (model: string, messages: Array<{ role: string; content: string }>, apiKey: string): Promise<string> => {
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + apiKey.trim(), "Content-Type": "application/json", "HTTP-Referer": window.location.origin, "X-Title": "AutoBusiness" }, body: JSON.stringify({ model, messages, temperature: 0.4 }) });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.error?.message || `OpenRouter request failed (${response.status})`);
-  const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) return content.map((part: { text?: string }) => part?.text ?? "").join("\n");
-  return "";
+const requestOpenRouter = async (model: string, messages: Array<{ role: string; content: string }>, apiKey: string, onChunk?: (text: string) => void): Promise<string> => {
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + apiKey.trim(), "Content-Type": "application/json", "HTTP-Referer": window.location.origin, "X-Title": "AutoBusiness" }, body: JSON.stringify({ model, messages, temperature: 0.4, stream: true }) });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload?.error?.message || `OpenRouter request failed (${response.status})`);
+  }
+  if (!response.body) throw new Error("Streaming is unavailable for this response.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result = "";
+  const consumeFrame = (frame: string) => {
+    const data = frame.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
+    if (!data || data === "[DONE]") return;
+    try {
+      const payload = JSON.parse(data);
+      const delta = payload?.choices?.[0]?.delta?.content;
+      const token = typeof delta === "string" ? delta : Array.isArray(delta) ? delta.map((part: { text?: string }) => part?.text ?? "").join("") : "";
+      if (token) { result += token; onChunk?.(token); }
+    } catch { /* Ignore non-content SSE frames. */ }
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true }).replaceAll("\r\n", "\n");
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    frames.forEach(consumeFrame);
+  }
+  buffer += decoder.decode().replaceAll("\r\n", "\n");
+  if (buffer.trim()) consumeFrame(buffer);
+  return result;
+};
+
+
+type EmployeeOutput = { action: "reply" | "start_job" | "ignore"; reply: string; title?: string; description?: string };
+const parseEmployeeOutput = (source: string): EmployeeOutput => {
+  const trimmed = source.trim();
+  let candidate = trimmed;
+  if (candidate.toLowerCase().startsWith("```json")) {
+    const lineEnd = candidate.indexOf("\n");
+    if (lineEnd >= 0) {
+      candidate = candidate.slice(lineEnd + 1).trim();
+      if (candidate.endsWith("```")) candidate = candidate.slice(0, -3).trim();
+    }
+  }
+  try {
+    const value = JSON.parse(candidate);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const action = typeof value.action === "string" ? value.action.toLowerCase() : "";
+      const reply = typeof value.reply === "string" ? value.reply : typeof value.message === "string" ? value.message : typeof value.content === "string" ? value.content : typeof value.response === "string" ? value.response : typeof value.text === "string" ? value.text : "";
+      if (action === "ignore" || action === "no_reply" || reply.trim() === "[[NO_REPLY]]") return { action: "ignore", reply: "" };
+      if (action === "start_job" || action === "start_assignment") return {
+        action: "start_job",
+        reply,
+        title: typeof value.title === "string" ? value.title : "",
+        description: typeof value.description === "string" ? value.description : ""
+      };
+      if (reply) return { action: "reply", reply };
+    }
+  } catch { /* Treat ordinary Markdown as text. */ }
+  if (trimmed === "[[NO_REPLY]]") return { action: "ignore", reply: "" };
+  if (trimmed.startsWith("[[START_JOB")) {
+    const markerEnd = trimmed.indexOf("]]");
+    if (markerEnd >= 0) {
+      const marker = trimmed.slice(0, markerEnd + 2);
+      return {
+        action: "start_job",
+        reply: trimmed.slice(markerEnd + 2).trim(),
+        title: marker.startsWith("[[START_JOB:") ? marker.slice(12, -2).trim() : ""
+      };
+    }
+  }
+  return { action: trimmed ? "reply" : "ignore", reply: trimmed };
+};
+const visibleEmployeeText = (source: string) => {
+  const trimmed = source.trimStart();
+  const markerPrefix = "[[START_JOB";
+  if (trimmed.startsWith(markerPrefix) || markerPrefix.startsWith(trimmed)) {
+    const markerEnd = trimmed.indexOf("]]");
+    return markerEnd >= 0 ? trimmed.slice(markerEnd + 2).trimStart() : "";
+  }
+  if ("[[NO_REPLY]]".startsWith(trimmed)) return "";
+  let jsonCandidate = trimmed;
+  if ("```json".startsWith(trimmed.toLowerCase()) || jsonCandidate.toLowerCase().startsWith("```json")) {
+    const lineEnd = jsonCandidate.indexOf("\n");
+    jsonCandidate = lineEnd >= 0 ? jsonCandidate.slice(lineEnd + 1).trimStart() : "";
+  }
+  if (jsonCandidate.startsWith("{")) {
+    try {
+      const value = JSON.parse(jsonCandidate);
+      if (value && typeof value === "object") {
+        if (value.action === "ignore" || value.action === "no_reply") return "";
+        return typeof value.reply === "string" ? value.reply : typeof value.message === "string" ? value.message : typeof value.content === "string" ? value.content : typeof value.response === "string" ? value.response : typeof value.text === "string" ? value.text : "";
+      }
+    } catch { return ""; }
+  }
+  return trimmed;
 };
 
 declare global { interface Window {} }
@@ -195,12 +285,14 @@ export default function App() {
   const [newEmployeeManager, setNewEmployeeManager] = useState("");
   const autoRunJobLockRef = useRef(false);
   const teamPulseLockRef = useRef(false);
-  const lastTeamPulseRef = useRef(0);
+  const lastTeamPulseRef = useRef("");
+  const teamChainRef = useRef(0);
   const collaborationRoomRef = useRef<Promise<Conversation | null> | null>(null);
   const [newChatName, setNewChatName] = useState("");
   const [newChatMembers, setNewChatMembers] = useState<string[]>([]);
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
+  const [liveChatDrafts, setLiveChatDrafts] = useState<Record<string, string>>({});
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [activeSettings, setActiveSettings] = useState("General");
   const [openRouterKey, setOpenRouterKey] = useState(() => window.localStorage.getItem(openRouterKeyName) ?? "");
@@ -453,7 +545,7 @@ export default function App() {
     };
     if (jobs.filter((job) => countInPeriod(job, "day")).length >= settings.dailyLimit) { notify("Daily job creation limit reached. Increase the limit in Settings to assign more work."); return; }
     if (jobs.filter((job) => countInPeriod(job, "month")).length >= settings.monthlyLimit) { notify("Monthly job creation limit reached. Increase the limit in Settings to assign more work."); return; }
-    const job: Job = { id: crypto.randomUUID(), title: jobTitle.trim(), description: jobDescription.trim(), employeeId: jobEmployee, status: settings.approvalRequired ? "Queued" : "In progress", priority: jobPriority, created: new Date().toISOString(), createdBy: user.id };
+    const job: Job = { id: crypto.randomUUID(), title: jobTitle.trim(), description: jobDescription.trim(), employeeId: jobEmployee, status: settings.approvalRequired ? "Queued" : "In progress", priority: jobPriority, created: new Date().toISOString(), updatedAt: new Date().toISOString(), createdBy: user.id };
     setJobs((old) => [job, ...old]);
     setEmployees((old) => old.map((e) => e.id === jobEmployee ? { ...e, status: job.status === "Queued" ? "Available" : "Working", task: job.title } : e));
     setJobTitle(""); setJobDescription(""); setJobPriority("Normal"); setShowJobForm(false); notify(settings.approvalRequired ? "Job queued for approval" : "Job assigned");
@@ -464,6 +556,8 @@ export default function App() {
     const text = message.trim();
     setMessage("");
     const sent: Message = { id: crypto.randomUUID(), from: "you", text, time: nowTime(), createdAt: new Date().toISOString() };
+    lastTeamPulseRef.current = "message:" + sent.id;
+    teamChainRef.current = 0;
     setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, sent] } : c));
 
     if (demoMode) {
@@ -476,7 +570,7 @@ export default function App() {
         const title = text.length > 84 ? text.slice(0, 81).trimEnd() + "…" : text;
         const job: Job = {
           id: crypto.randomUUID(), title, description: text, employeeId: responder.id, status: "Submitted",
-          priority: "Normal", created: new Date().toISOString(), submittedAt: new Date().toISOString(),
+          priority: "Normal", created: new Date().toISOString(), updatedAt: new Date().toISOString(), submittedAt: new Date().toISOString(),
           createdBy: user?.id,
           result: "# Demo deliverable\n\nThis is a simulated deliverable created to demonstrate the review workflow. No external AI service was called.\n\n## Request\n" + text + "\n\n## Suggested next steps\nReview the result, add revision feedback if needed, or approve it to complete the workflow."
         };
@@ -522,8 +616,10 @@ export default function App() {
           "\\n\\nPAST AND CURRENT ASSIGNMENTS\\n" + (assignmentHistory || "No earlier assignments.") +
           "\\n\\nUse this as persistent working context. Remember decisions, preferences, commitments, previous results, and feedback; do not claim to remember anything outside this supplied history.";
       };
+      const groupMembers = activeConversation.members.map((id) => employeeMap.get(id)).filter((emp): emp is Employee => Boolean(emp) && emp?.status !== "Paused");
+      // Invite every group member to consider the message independently.
       const targets = activeConversation.kind === "group"
-        ? activeConversation.members.map((id) => employeeMap.get(id)).filter((emp): emp is Employee => Boolean(emp) && emp?.status !== "Paused")
+        ? groupMembers
         : activeConversation.members.length === 1
           ? [employeeMap.get(activeConversation.members[0])].filter((emp): emp is Employee => Boolean(emp))
           : [];
@@ -539,33 +635,41 @@ export default function App() {
         try {
           const model = freeModels.some((item) => item.id === emp.model) ? emp.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
           const groupInstruction = activeConversation.kind === "group"
-            ? "This is a group chat. Independently decide whether to reply, start a substantial assignment for yourself, or stay silent. Avoid acknowledgement-only replies and do not impersonate coworkers."
+            ? "This is a group chat. Independently decide whether to reply, start a substantial assignment for yourself, or stay silent. Because other members receive the same request, only open an assignment if you are clearly the most suitable owner and no existing assignment covers it. Avoid duplicate work, acknowledgement-only replies, and impersonating coworkers."
             : "This is a private chat. Decide whether to reply conversationally or open an assignment for yourself if the user has requested meaningful work.";
           const prompt = [
-            { role: "system", content: "You are " + emp.name + ", " + emp.role + " in the " + company?.name + " workspace. Tone: " + emp.tone + ". Custom instructions: " + (emp.instructions || "Be accurate and useful.") + ". Current task: " + (emp.task || "none") + ".\\n" + groupInstruction + "\\nReturn ONLY valid JSON with keys action, reply, title, description. action must be reply, start_job, or ignore. Use start_job when the request requires a substantive deliverable you should own and work on; title should be concise and description should capture the task, constraints, context and success criteria. Use reply for discussion/questions that do not need a tracked deliverable. Use ignore only when you have no useful contribution. In group chat, only employees with a useful role should act. Never claim work is completed before producing it." },
+            { role: "system", content: "You are " + emp.name + ", " + emp.role + " in the " + company?.name + " workspace. Tone: " + emp.tone + ". Custom instructions: " + (emp.instructions || "Be accurate and useful.") + ". Current task: " + (emp.task || "none") + ".\\n" + groupInstruction + "\\nRespond in natural Markdown or plain text, never JSON. If you decide to take ownership of a substantial task, begin with [[START_JOB: concise title]] on its own line, then continue with a brief acknowledgement. If you have no useful contribution, return exactly [[NO_REPLY]]. Otherwise reply naturally. Decide independently; silence is acceptable. Never claim work is completed before producing it." },
             { role: "user", content: workspaceMemoryFor(emp) + "\\n\\nCURRENT CONVERSATION (" + activeConversation.name + "):\\n" + (dialogue || "(No previous messages.)") + "\\n\\nLATEST REQUEST: " + text + "\\n\\nUse all supplied memory consistently. Do not create duplicate assignments for work already completed or in progress unless the user clearly requests a new one." }
           ];
-          const raw = await requestOpenRouter(model, prompt, openRouterKey);
-          let decision: { action?: string; reply?: string; title?: string; description?: string } = {};
-          try {
-            const json = raw.trim().replace(/^\x60\x60\x60(?:json)?\s*/i, "").replace(/\s*\x60\x60\x60$/, "");
-            decision = JSON.parse(json);
-          } catch {
-            // Gracefully support a provider response that ignored the JSON-only instruction.
-            decision = { action: raw.trim() && raw.trim() !== "[[NO_REPLY]]" ? "reply" : "ignore", reply: raw.trim() };
-          }
+          const draftKey = activeConversation.id + ":" + emp.id;
+          let rawStream = "";
+          setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
+          const raw = await requestOpenRouter(model, prompt, openRouterKey, (chunk) => {
+            rawStream += chunk;
+            const visible = visibleEmployeeText(rawStream);
+            if (visible) setLiveChatDrafts((old) => ({ ...old, [draftKey]: visible }));
+          });
+          const decision = parseEmployeeOutput(raw);
           if (decision.action === "start_job") {
             const title = (decision.title || text).trim().slice(0, 240);
-            const job: Job = { id: crypto.randomUUID(), title: title || "Employee task", description: (decision.description || text).trim(), employeeId: emp.id, status: "In progress", priority: "Normal", created: new Date().toISOString(), createdBy: user?.id };
+            const job: Job = { id: crypto.randomUUID(), title: title || "Employee task", description: (decision.description || text).trim(), employeeId: emp.id, status: "In progress", priority: "Normal", created: new Date().toISOString(), updatedAt: new Date().toISOString(), createdBy: user?.id };
             setJobs((old) => [job, ...old]);
             setEmployees((old) => old.map((employee) => employee.id === emp.id ? { ...employee, status: "Working", task: job.title } : employee));
             const workPrompt = [
               { role: "system", content: "You are " + emp.name + ", " + emp.role + ". Complete the assignment and produce the actual deliverable. Follow your instructions: " + (emp.instructions || "Be accurate and useful.") + ". Do not claim external actions or access you do not have. If blocked, clearly report the blocker and what is needed." },
               { role: "user", content: workspaceMemoryFor(emp) + "\\n\\nASSIGNMENT: " + job.title + "\\nBRIEF: " + job.description + "\\n\nCURRENT CHAT CONTEXT:\\n" + dialogue + "\\n\\nUSER'S LATEST REQUEST: " + text + "\\n\\nProduce the deliverable now, not a plan." }
             ];
-            const deliverable = (await requestOpenRouter(model, workPrompt, openRouterKey)).trim();
+            let deliverableStream = "";
+            const rawDeliverable = await requestOpenRouter(model, workPrompt, openRouterKey, (chunk) => {
+              deliverableStream += chunk;
+              const visible = visibleEmployeeText(deliverableStream);
+              setJobs((old) => old.map((item) => item.id === job.id ? { ...item, result: visible } : item));
+            });
+            const parsedDeliverable = parseEmployeeOutput(rawDeliverable);
+            const deliverable = parsedDeliverable.reply || rawDeliverable.trim();
             if (!deliverable) throw new Error("The assignment was opened, but the AI returned an empty deliverable.");
-            setJobs((old) => old.map((item) => item.id === job.id ? { ...item, status: "Submitted", result: deliverable, submittedAt: new Date().toISOString() } : item));
+            const submittedAt = new Date().toISOString();
+            setJobs((old) => old.map((item) => item.id === job.id ? { ...item, status: "Submitted", result: deliverable, submittedAt, updatedAt: submittedAt } : item));
             setEmployees((old) => old.map((employee) => employee.id === emp.id ? { ...employee, status: "Needs review", task: job.title } : employee));
             return { emp, answer: "I’ve opened an assignment for myself: " + job.title + "\\n\\nI’ve completed a first deliverable and submitted it for review. You can inspect it in Jobs & approvals.", error: "", jobId: job.id };
           }
@@ -576,6 +680,7 @@ export default function App() {
         }
       }));
 
+      setLiveChatDrafts({});
       const responses: Message[] = replies
         .filter(({ answer }) => answer && answer !== "[[NO_REPLY]]")
         .map(({ emp, answer, jobId }) => ({ id: crypto.randomUUID(), from: emp.id, text: answer, time: nowTime(), createdAt: new Date().toISOString(), jobId }));
@@ -602,6 +707,7 @@ export default function App() {
           : "OpenRouter request failed: " + reason;
       setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: "system", text: detail + " Your original message is saved.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
     } finally {
+      setLiveChatDrafts({});
       setBusy(false);
     }
   };
@@ -677,6 +783,28 @@ export default function App() {
       const addWorkNote = (employeeId: string, text: string) => {
         if (room) appendAgentMessages(room, [{ id: crypto.randomUUID(), from: employeeId, text, time: nowTime(), createdAt: new Date().toISOString(), jobId }]);
       };
+      const streamEmployeeOutput = async (employee: Employee, messages: Array<{ role: string; content: string }>, showInJob: boolean = false) => {
+        const draftKey = room ? room.id + ":" + employee.id : "";
+        let streamed = "";
+        if (draftKey) setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
+        try {
+          const rawOutput = await requestOpenRouter(modelFor(employee), messages, openRouterKey, (chunk) => {
+            streamed += chunk;
+            const visible = visibleEmployeeText(streamed);
+            if (draftKey) setLiveChatDrafts((old) => ({ ...old, [draftKey]: visible }));
+            if (showInJob) setJobs((old) => old.map((item) => item.id === jobId ? { ...item, result: visible } : item));
+          });
+          const parsedOutput = parseEmployeeOutput(rawOutput);
+          return parsedOutput.reply || rawOutput.trim();
+        } finally {
+          if (draftKey) setLiveChatDrafts((old) => {
+            const next = { ...old };
+            delete next[draftKey];
+            return next;
+          });
+        }
+      };
+      setJobs((old) => old.map((item) => item.id === jobId ? { ...item, result: "" } : item));
       addWorkNote(emp.id, "Starting “" + job.title + "”. I’m breaking the brief into a deliverable, checking the acceptance criteria, and coordinating a supporting contribution before review.");
       const colleagues = employees.filter((candidate) => candidate.id !== emp.id && candidate.status !== "Paused");
       const contributor = colleagues.find((candidate) => candidate.id !== manager?.id && candidate.deptId === emp.deptId)
@@ -686,23 +814,23 @@ export default function App() {
         ?? colleagues.find((candidate) => candidate.id !== contributor?.id && candidate.status !== "Paused")
         ?? (contributor?.id !== emp.id ? contributor : undefined);
       const prompt = "You are " + emp.name + ", " + emp.role + " in " + department + " at " + company?.name + ". Your manager is " + (manager?.name ?? "the company owner") + ". Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\n\nJOB: " + job.title + "\n\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\n\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\n\nProduce the actual deliverable, not a plan to do it. Use clear headings and concrete content. Address review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly. Include a short ## Work note with a 2–3 sentence summary of your approach and decisions; do not expose private hidden chain-of-thought.";
-      const draft = (await requestOpenRouter(modelFor(emp), [{ role: "user", content: prompt }], openRouterKey)).trim();
+      const draft = await streamEmployeeOutput(emp, [{ role: "user", content: prompt }], true);
       if (!draft) throw new Error("The AI provider returned an empty deliverable.");
       let output = draft;
       let reviewFeedback = "";
       if (contributor) {
         addWorkNote(emp.id, "I have a first draft. I’m asking " + contributor.name + " (" + contributor.role + ") to contribute a specialist section so the final result is one coordinated piece of work.");
         try {
-          const contribution = (await requestOpenRouter(modelFor(contributor), [
+          const contribution = await streamEmployeeOutput(contributor, [
             { role: "system", content: "You are " + contributor.name + ", " + contributor.role + " in " + departmentPath(contributor.deptId) + ". You are collaborating with " + emp.name + " on the SAME deliverable. Return a focused, useful contribution that can be incorporated into the shared document, not a separate deliverable. Explain assumptions briefly, avoid repeating the whole draft, and never invent company facts. Keep the contribution under 700 words." },
             { role: "user", content: "SHARED JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nCURRENT DRAFT FROM " + emp.name + ":\n" + draft + "\n\nProvide the most valuable complementary section or improvements for this same deliverable." }
-          ], openRouterKey)).trim();
+          ], true);
           if (contribution) {
             addWorkNote(contributor.id, "I’ve reviewed " + emp.name + "’s draft and contributed the following material to the shared deliverable:\n\n" + contribution.slice(0, 1400));
-            const integrated = (await requestOpenRouter(modelFor(emp), [
+            const integrated = await streamEmployeeOutput(emp, [
               { role: "system", content: "You are " + emp.name + ", the accountable owner of this shared deliverable. Integrate the specialist contribution into your existing draft. Remove duplication, resolve conflicts, preserve useful content and return one cohesive final document in Markdown. Do not claim external actions. State assumptions and limitations clearly." },
               { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nYOUR DRAFT:\n" + draft + "\n\nSPECIALIST CONTRIBUTION FROM " + contributor.name + " (" + contributor.role + "):\n" + contribution + "\n\nCreate one integrated deliverable, not two separate pieces." }
-            ], openRouterKey)).trim();
+            ], true);
             if (integrated) output = integrated;
             addWorkNote(emp.id, "I’ve integrated " + contributor.name + "’s contribution into one document and removed duplicated points. I’m sending the combined version for review.");
           }
@@ -712,15 +840,15 @@ export default function App() {
       }
       if (reviewer) {
         try {
-          reviewFeedback = (await requestOpenRouter(modelFor(reviewer), [
+          reviewFeedback = await streamEmployeeOutput(reviewer, [
             { role: "system", content: "You are " + reviewer.name + ", " + reviewer.role + " and " + (manager?.id === reviewer.id ? "the manager" : "a collaborating colleague") + " of " + emp.name + ". Review the draft against the brief. Give concise, specific feedback: gaps, factual cautions, missing acceptance criteria and concrete improvements. Do not rewrite the entire deliverable and do not invent facts." },
-            { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nDRAFT FROM " + emp.name + ":\n" + draft + "\n\nProvide a useful peer review in under 250 words." }
-          ], openRouterKey)).trim();
+            { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nDRAFT FROM " + emp.name + ":\n" + output + "\n\nProvide a useful peer review in under 250 words." }
+          ], true);
           if (reviewFeedback) {
-            const revised = (await requestOpenRouter(modelFor(emp), [
+            const revised = await streamEmployeeOutput(emp, [
               { role: "system", content: "You are " + emp.name + ", " + emp.role + ". Refine your deliverable using the peer review. Keep strong original material, address valid issues, and do not blindly accept unsupported feedback. Produce only the revised final deliverable." },
-              { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nYOUR FIRST DRAFT:\n" + draft + "\n\nREVIEW FROM " + reviewer.name + ":\n" + reviewFeedback + "\n\nPREVIOUS USER FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None") }
-            ], openRouterKey)).trim();
+              { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nYOUR FIRST DRAFT:\n" + output + "\n\nREVIEW FROM " + reviewer.name + ":\n" + reviewFeedback + "\n\nPREVIOUS USER FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None") }
+            ], true);
             if (revised) output = revised;
           }
         } catch (reviewError) {
@@ -730,7 +858,7 @@ export default function App() {
         }
       }
       const submittedAt = new Date().toISOString();
-      setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Submitted", result: output, submittedAt } : item));
+      setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Submitted", result: output, submittedAt, updatedAt: submittedAt } : item));
       setEmployees((old) => old.map((employee) => employee.id === emp.id ? { ...employee, status: "Needs review", task: job.title } : employee));
       if (reviewFeedback && reviewer) {
         addWorkNote(reviewer.id, "Reviewing the shared document against the brief. My checks are completeness, unsupported claims, and whether the acceptance criteria are met.\n\nReview notes for “" + job.title + "”:\n\n" + reviewFeedback.slice(0, 1800));
@@ -743,75 +871,199 @@ export default function App() {
       const reason = describeError(error, "Unknown OpenRouter error");
       if (!background) notify("AI job failed: " + reason);
       else {
-        setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Queued" } : item));
+        setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Queued", updatedAt: new Date().toISOString() } : item));
         setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Available" } : employee));
         notify("Background agent could not complete the job; it was returned to the queue: " + reason);
       }
     } finally { if (!background) setBusy(false); }
   };
   useEffect(() => {
-    if (demoMode || !user || !company || loadedCompanyId !== company.id || !settings.autoRun || !openRouterKey.trim() || !settings.connectors.includes("OpenRouter")) return;
-    let cancelled = false;
-    const tick = async () => {
-      if (cancelled || busy || autoRunJobLockRef.current || teamPulseLockRef.current) return;
-      const nextJob = jobs.filter((job) => job.status === "In progress").sort((a, b) => {
-        const aTime = Date.parse(a.created); const bTime = Date.parse(b.created);
-        return (Number.isNaN(aTime) ? 0 : aTime) - (Number.isNaN(bTime) ? 0 : bTime);
-      })[0];
-      if (nextJob) {
-        autoRunJobLockRef.current = true;
-        try { await runJob(nextJob.id, undefined, { background: true }); }
-        finally { autoRunJobLockRef.current = false; }
-        return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id || !openRouterKey.trim() || !settings.connectors.includes("OpenRouter")) return;
+    if (busy || autoRunJobLockRef.current || teamPulseLockRef.current) return;
+
+    const nextJob = settings.autoRun ? jobs.filter((job) => job.status === "In progress").sort((a, b) =>
+      (Date.parse(a.created) || 0) - (Date.parse(b.created) || 0)
+    )[0] : undefined;
+    if (nextJob) {
+      autoRunJobLockRef.current = true;
+      void runJob(nextJob.id, undefined, { background: true }).finally(() => {
+        autoRunJobLockRef.current = false;
+        setJobs((old) => old.slice());
+      });
+      return;
+    }
+
+    const messageEvents = conversations.flatMap((conversation) => conversation.messages
+      .filter((message) => message.from !== "system")
+      .map((message) => ({
+        key: "message:" + message.id,
+        at: Date.parse(message.createdAt || "") || 0,
+        kind: "message" as const,
+        conversation,
+        message
+      })));
+    const jobEvents = jobs.filter((job) => ["Queued", "In progress", "Submitted", "Rejected", "Approved"].includes(job.status))
+      .map((job) => ({
+        key: "job:" + job.id + ":" + job.status + ":" + (job.updatedAt || job.submittedAt || job.created),
+        at: Date.parse(job.updatedAt || job.submittedAt || job.created) || 0,
+        kind: "job" as const,
+        job
+      }));
+    const latestEvent = [...messageEvents, ...jobEvents].sort((a, b) => b.at - a.at)[0];
+    if (!latestEvent) return;
+
+    // Ignore existing history on the first loaded render.
+    if (!lastTeamPulseRef.current) {
+      lastTeamPulseRef.current = latestEvent.key;
+      return;
+    }
+    if (latestEvent.key === lastTeamPulseRef.current) return;
+    if (latestEvent.kind === "job") teamChainRef.current = 0;
+
+    // Every meaningful reply can start the next decision. Stop after a bounded
+    // chain even if models keep producing acknowledgements.
+    if (teamChainRef.current >= 8) {
+      lastTeamPulseRef.current = latestEvent.key;
+      teamChainRef.current = 0;
+      return;
+    }
+
+    const activeEmployees = employees.filter((employee) => employee.status !== "Paused");
+    if (!activeEmployees.length) return;
+
+    let destination: Conversation | null = null;
+    let candidates: Employee[] = [];
+    let eventDescription = "";
+
+    if (latestEvent.kind === "message") {
+      destination = latestEvent.conversation;
+      const members = latestEvent.conversation.members
+        .map((id) => employeeMap.get(id))
+        .filter((employee): employee is Employee => Boolean(employee) && employee?.status !== "Paused");
+      if (latestEvent.message.from === "you") candidates = members;
+      else {
+        const sourceIndex = members.findIndex((employee) => employee.id === latestEvent.message.from);
+        if (sourceIndex >= 0) candidates = [...members.slice(sourceIndex + 1), ...members.slice(0, sourceIndex)];
+        else candidates = members;
       }
-      const activeJobs = jobs.filter((job) => ["Queued", "In progress", "Submitted", "Rejected"].includes(job.status));
-      const activeGoals = goals.filter((goal) => goal.status === "active" || goal.status === "planned");
-      if (Date.now() - lastTeamPulseRef.current < 15 * 1000) return;
-      const activeEmployees = employees.filter((employee) => employee.status !== "Paused");
-      if (activeEmployees.length < 2) return;
+      eventDescription = "A new message in " + latestEvent.conversation.name + " from " +
+        (latestEvent.message.from === "you" ? "the company owner" : employeeMap.get(latestEvent.message.from)?.name || "a colleague") +
+        ":\n" + latestEvent.message.text;
+    } else {
+      const job = latestEvent.job;
+      destination = null;
+      const owner = employeeMap.get(job.employeeId);
+      const manager = owner?.managerId ? employeeMap.get(owner.managerId) : undefined;
+      const prioritized = job.status === "Rejected"
+        ? [owner, manager]
+        : job.status === "Submitted" || job.status === "Approved"
+          ? [manager, owner]
+          : [owner, manager];
+      candidates = [...prioritized, ...activeEmployees]
+        .filter((employee): employee is Employee => Boolean(employee) && employee?.status !== "Paused")
+        .filter((employee, index, list) => list.findIndex((item) => item.id === employee.id) === index);
+      eventDescription = "Assignment activity: \"" + job.title + "\" is now " + job.status +
+        ". Assigned employee: " + (owner?.name || "Unassigned") +
+        ". Brief: " + (job.description || "No brief supplied.") +
+        (job.reviewNote ? "\nReview feedback: " + job.reviewNote : "") +
+        (job.result && job.status === "Submitted" ? "\nSubmitted deliverable:\n" + job.result.slice(0, 5000) : "");
+    }
+
+    if (!candidates.length) {
+      lastTeamPulseRef.current = latestEvent.key;
+      teamChainRef.current = 0;
+      return;
+    }
+
+    const processEvent = async () => {
       teamPulseLockRef.current = true;
-      lastTeamPulseRef.current = Date.now();
+      lastTeamPulseRef.current = latestEvent.key;
       try {
-        const room = await ensureCollaborationRoom();
-        if (!room) return;
-        const tickIndex = Math.floor(Date.now() / (15 * 1000)) % activeEmployees.length;
-        const actor = activeEmployees[tickIndex];
-        const peer = (actor.managerId ? employeeMap.get(actor.managerId) : undefined)
-          ?? activeEmployees.find((employee) => employee.managerId === actor.id)
-          ?? activeEmployees.find((employee) => employee.id !== actor.id);
-        if (!peer || actor.id === peer.id) return;
-        const jobContext = activeJobs.slice(0, 8).map((job) => "- " + job.title + " (" + job.status + ", owner: " + (employeeMap.get(job.employeeId)?.name ?? "unassigned") + "): " + (job.description || "No brief supplied")).join("\n");
-        const goalContext = activeGoals.slice(0, 8).map((goal) => "- " + goal.title + " (" + goal.progress + "%): " + goal.description).join("\n");
-        const priorTeamChat = room.messages.slice(-8).map((message) => (employeeMap.get(message.from)?.name ?? message.from) + ": " + message.text).join("\n");
-        const actorModel = freeModels.some((item) => item.id === actor.model) ? actor.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
-        const peerModel = freeModels.some((item) => item.id === peer.model) ? peer.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
-        const update = (await requestOpenRouter(actorModel, [
-          { role: "system", content: "You are " + actor.name + ", " + actor.role + " at " + company.name + ". You are an autonomous teammate who can coordinate with coworkers whenever you have a useful reason to do so. Your manager is " + managerNameFor(actor.managerId) + ". Use only the supplied workspace facts. Behave like a real colleague: continue an unfinished thread, ask " + peer.name + " a specific question, answer a previous question, offer a concrete contribution, challenge an assumption constructively, or share a short work update with a rationale. You may send multiple messages across a discussion, and you may also stay silent when there is nothing useful to add. Do not invent progress, decisions, metrics, or actions. Avoid generic small talk and repeated check-ins. Return exactly [NO_UPDATE] when you choose not to send a message. Keep under 120 words." },
-          { role: "user", content: "ACTIVE JOBS:\n" + (jobContext || "No open jobs.") + "\n\nGOALS:\n" + (goalContext || "No active goals.") + "\n\nRECENT TEAM COLLABORATION:\n" + (priorTeamChat || "No previous collaboration messages.") + "\n\nWrite a concise internal update that states the action or next step and a short rationale, then invites a concrete response from the colleague. Active jobs: " + (activeJobs.length ? "listed above" : "none currently active") + ". Return [NO_UPDATE] only if no useful coordination is possible." }
-        ], openRouterKey)).trim();
-        if (!update || /^\[NO_UPDATE\]$/i.test(update) || /^NO_ACTION$/i.test(update)) return;
-        const reply = (await requestOpenRouter(peerModel, [
-          { role: "system", content: "You are " + peer.name + ", " + peer.role + " collaborating with " + actor.name + ". Decide independently whether to respond now. You may answer the question, contribute specialist work, ask a useful follow-up, disagree constructively with reasons, or stay silent. Use only the provided facts. Do not invent progress or claim actions were completed. If you have no useful contribution, return exactly [NO_UPDATE]. Keep under 100 words." },
-          { role: "user", content: "ACTIVE JOBS:\n" + (jobContext || "No open jobs.") + "\n\nACTIVE GOALS:\n" + (goalContext || "No active goals.") + "\n\n" + actor.name + " wrote:\n" + update }
-        ], openRouterKey)).trim();
-        const now = new Date().toISOString();
-        const entries: Message[] = [{ id: crypto.randomUUID(), from: actor.id, text: update.slice(0, 2000), time: nowTime(), createdAt: now }];
-        if (reply && !/^\[NO_UPDATE\]$/i.test(reply) && !/^NO_ACTION$/i.test(reply)) entries.push({ id: crypto.randomUUID(), from: peer.id, text: reply.slice(0, 1600), time: nowTime(), createdAt: new Date(Date.now() + 1).toISOString() });
-        appendAgentMessages(room, entries);
+        if (latestEvent.kind === "job") destination = await ensureCollaborationRoom();
+        if (!destination) return;
+
+        const recentHistory = destination.messages.slice(-12).map((message) =>
+          (message.from === "you" ? "Owner" : employeeMap.get(message.from)?.name || "Colleague") + ": " + message.text
+        ).join("\n\n");
+
+        let contributed = false;
+        for (const actor of candidates) {
+          const model = freeModels.some((item) => item.id === actor.model)
+            ? actor.model
+            : freeModels[0]?.id ?? fallbackFreeModels[0].id;
+          const prompt = [
+            {
+              role: "system",
+              content: "You are " + actor.name + ", " + actor.role + " at " + company.name +
+                ". Tone: " + actor.tone + ". Instructions: " + (actor.instructions || "Be accurate, useful and professional.") +
+                ". Decide independently whether you have a useful contribution to the latest event. You may answer, ask a relevant question, review submitted work, suggest a concrete next action, or stay silent. Use only supplied facts. Do not invent progress or claim actions you have not completed. Reply in natural Markdown or plain text, never JSON. If there is nothing useful to add, return exactly [NO_REPLY]. Avoid filler acknowledgements."
+            },
+            {
+              role: "user",
+              content: "LATEST WORKSPACE EVENT:\n" + eventDescription +
+                "\n\nRECENT CONVERSATION:\n" + (recentHistory || "No previous conversation.") +
+                "\n\nOPEN ASSIGNMENTS:\n" + (jobs.filter((job) => job.status !== "Approved").slice(0, 8)
+                  .map((job) => "- " + job.title + " (" + job.status + ")").join("\n") || "None")
+            }
+          ];
+
+          const draftKey = destination.id + ":" + actor.id;
+          let streamed = "";
+          setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
+          let response = "";
+          try {
+            response = await requestOpenRouter(model, prompt, openRouterKey, (chunk) => {
+              streamed += chunk;
+              const visible = streamed.trimStart();
+              if (!"[[NO_REPLY]]".startsWith(visible)) {
+                setLiveChatDrafts((old) => ({ ...old, [draftKey]: streamed }));
+              }
+            });
+          } finally {
+            setLiveChatDrafts((old) => {
+              const next = { ...old };
+              delete next[draftKey];
+              return next;
+            });
+          }
+
+          const parsedResponse = parseEmployeeOutput(response);
+          const reply = parsedResponse.reply.trim();
+          if (parsedResponse.action === "ignore" || !reply) continue;
+
+          const message: Message = {
+            id: crypto.randomUUID(),
+            from: actor.id,
+            text: reply,
+            time: nowTime(),
+            createdAt: new Date().toISOString(),
+            jobId: latestEvent.kind === "job" ? latestEvent.job.id : undefined
+          };
+          appendAgentMessages(destination, [message]);
+          teamChainRef.current += 1;
+          if (teamChainRef.current >= 8) {
+            lastTeamPulseRef.current = "message:" + message.id;
+            teamChainRef.current = 0;
+          }
+          contributed = true;
+          break;
+        }
+
+        if (!contributed) teamChainRef.current = 0;
       } catch (error) {
-        notify("Background collaboration could not run: " + describeError(error, "Unknown AI error"));
+        notify("Event-driven collaboration could not run: " + describeError(error, "Unknown AI error"));
+        teamChainRef.current = 0;
       } finally {
         teamPulseLockRef.current = false;
+        setConversations((old) => old.slice());
       }
     };
-    const timer = window.setInterval(() => { void tick(); }, 15000);
-    void tick();
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [demoMode, user?.id, company?.id, loadedCompanyId, settings.autoRun, settings.connectors, openRouterKey, jobs, employees, conversations, goals, freeModels, busy]);
+    void processEvent();
+  }, [demoMode, user?.id, company?.id, loadedCompanyId, settings.autoRun, settings.connectors, openRouterKey, jobs, employees, conversations, freeModels, busy]);
 
-  const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
-  const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress" } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
-  const requestRevision = (jobId: string) => { if (!reviewNote.trim()) { notify("Add a note explaining what needs to change"); return; } setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Rejected", reviewNote: reviewNote.trim() } : j)); notify("Revision requested — feedback saved to the job"); };
+  const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id, updatedAt: new Date().toISOString() } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
+  const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress", updatedAt: new Date().toISOString() } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
+  const requestRevision = (jobId: string) => { if (!reviewNote.trim()) { notify("Add a note explaining what needs to change"); return; } setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Rejected", reviewNote: reviewNote.trim(), updatedAt: new Date().toISOString() } : j)); notify("Revision requested — feedback saved to the job"); };
   const deleteJob = async (jobId: string) => { if (company && !demoMode) { const { error } = await supabase.from("jobs").delete().eq("id", jobId).eq("company_id", company.id); if (error) { notify("Could not delete job: " + error.message); return; } } setJobs((old) => old.filter((j) => j.id !== jobId)); setSelectedJobId((current) => current === jobId ? null : current); notify(demoMode ? "Demo job removed for this session" : "Job deleted"); };
   const createCompany = async (event: FormEvent) => {
     event.preventDefault();
@@ -1081,14 +1333,15 @@ export default function App() {
           <div className="chat-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> Communication</div><h1>Communication</h1><p>Talk to your team and coordinate work in one place.</p></div><button className="primary-button" onClick={() => setShowChatForm(true)}><Plus size={16} /> New conversation</button></div>
           <div className="chat-window panel"><div className="chat-main-head">{activeConversation && <><span className={"chat-avatar " + (activeConversation.kind === "group" ? "team-avatar" : "")}>{activeConversation.kind === "group" ? <Users size={17} /> : initials(activeConversation.name)}</span><div><strong>{activeConversation.name}</strong><small>{activeConversation.kind === "group" ? activeConversation.members.length + " team members" : "Private conversation"}</small></div></>}<button className={"icon-button subtle " + (showChatDetails ? "active" : "")} title="Conversation details and team directory" onClick={() => setShowChatDetails((open) => !open)}><MoreHorizontal size={18} /></button></div>
             {showChatDetails && <aside className="chat-details-panel"><div className="chat-details-title"><div><strong>People in this chat</strong><small>{activeConversation?.members.length ?? 0} employees</small></div><button className="tiny-icon" onClick={() => setShowChatDetails(false)} aria-label="Close people panel">×</button></div>{activeConversation?.members.length ? activeConversation.members.map((memberId) => employeeMap.get(memberId)).filter((e): e is Employee => Boolean(e) && (e!.name + " " + e!.role).toLowerCase().includes(search.toLowerCase())).map((e) => <button className="chat-detail-person" key={e.id} onClick={() => { setProfileEmployeeId(e.id); setShowChatDetails(false); }}><span className="avatar small">{initials(e.name)}</span><span><strong>{e.name}</strong><small>{e.role} · reports to {managerNameFor(e.managerId)}</small></span><ChevronRight size={15} /></button>) : <p className="chat-details-empty">No employees are in this conversation.</p>}</aside>}
-            <div className="message-stream">{activeConversation?.messages.map((m) => <div key={m.id} className={"message-row " + (m.from === "you" ? "mine" : "")}><span className="avatar tiny">{initials(employeeNameFor(m.from))}</span><div className="message-content"><div className="message-meta"><strong>{employeeNameFor(m.from)}</strong><span>{m.time}</span></div><div className="message-bubble"><MarkdownPreview content={m.text} /></div>{m.jobId && <button className="message-job-link" onClick={() => { changePage("Jobs & approvals"); setSelectedJobId(m.jobId ?? null); }}><Inbox size={13} /> View job and deliverable</button>}</div></div>)}
-              {busy && <div className="typing-indicator"><span /><span /><span /> {activeConversation?.name} is thinking…</div>}
+            <div className="message-stream">{activeConversation?.messages.map((m) => <div key={m.id} className={"message-row " + (m.from === "you" ? "mine" : "")}><span className="avatar tiny">{initials(employeeNameFor(m.from))}</span><div className="message-content"><div className="message-meta"><strong>{employeeNameFor(m.from)}</strong><span>{m.time}</span></div><div className="message-bubble"><MarkdownPreview content={parseEmployeeOutput(m.text).reply || m.text} /></div>{m.jobId && <button className="message-job-link" onClick={() => { changePage("Jobs & approvals"); setSelectedJobId(m.jobId ?? null); }}><Inbox size={13} /> View job and deliverable</button>}</div></div>)}
+              {Object.entries(liveChatDrafts).filter(([key, draft]) => key.startsWith((activeConversation?.id ?? "") + ":") && draft).map(([key, draft]) => { const employeeId = key.split(":")[1]; return <div className="message-row" key={key}><span className="avatar tiny">{initials(employeeNameFor(employeeId))}</span><div className="message-content"><div className="message-meta"><strong>{employeeNameFor(employeeId)}</strong><span>typing</span></div><div className="message-bubble streaming-bubble"><MarkdownPreview content={draft} /><span className="streaming-cursor" /></div></div></div>; })}
+              {busy && !Object.entries(liveChatDrafts).some(([key, draft]) => key.startsWith((activeConversation?.id ?? "") + ":") && Boolean(draft)) && <div className="typing-indicator"><span /><span /><span /> A colleague is deciding whether to contribute…</div>}
               {!activeConversation?.messages.length && <div className="chat-empty"><span className="chat-empty-icon"><MessageCircle size={22} /></span><strong>Start the conversation</strong><p>Send a message. Employees decide whether to reply or open and complete assignments themselves.</p></div>}
             </div>
             <div className="chat-composer-area"><div className="composer-tools"><span>{demoMode ? "Demo messages stay in this session" : "Messages are saved to your cloud workspace"}</span></div><form className="chat-composer" onSubmit={sendMessage}><textarea value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement)?.requestSubmit(); } }} placeholder={"Message " + (activeConversation?.name ?? "your team") + "…"} rows={2} /><button className="send-button" type="submit" disabled={!message.trim()} aria-label="Send message"><Send size={17} /></button></form><small className="composer-hint">Enter to send · Shift + Enter for a new line</small></div>
           </div>
         </div>}
-        {page === "Jobs & approvals" && <div className="page-wrap"><div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> Operations</div><h1>Jobs & approvals</h1><p>Track delegated work and review submitted results.</p></div></div><div className="job-filters"><span>{jobs.length} total jobs</span><span className="filter-pill">{jobs.filter((j) => j.status === "Queued").length} queued</span><span className="filter-pill review">{jobs.filter((j) => j.status === "Submitted").length} awaiting review</span><span className="filter-pill">{jobs.filter((j) => j.status === "Rejected").length} revisions</span></div><div className="job-toolbar"><label className="job-search"><Search size={15} /><input value={jobSearch} onChange={(e) => setJobSearch(e.target.value)} placeholder="Search jobs, details, employees…" /></label><select value={jobStatusFilter} onChange={(e) => setJobStatusFilter(e.target.value)} aria-label="Filter jobs by status">{["All statuses", "Queued", "In progress", "Submitted", "Rejected", "Approved"].map((status) => <option key={status}>{status}</option>)}</select></div><div className="panel all-jobs">{filteredJobs.map((j) => { const emp = employeeMap.get(j.employeeId); return <div className="all-job-row" key={j.id}><span className="avatar">{initials(emp?.name ?? "AI")}</span><div className="all-job-copy"><strong>{j.title}</strong><small>Assigned to {emp?.name ?? "Unassigned"} · {new Date(j.created).toLocaleString()} · {j.priority}{j.description ? " · " + j.description : ""}</small></div><span className={"job-status " + j.status.toLowerCase().replace(" ", "-")}>{j.status}</span>{j.status === "Queued" && <button className="secondary-button compact-button" onClick={() => startJob(j.id)}>Start job</button>}{(j.status === "In progress" || j.status === "Rejected") && <button className="secondary-button compact-button" disabled={busy} onClick={() => { if (j.status === "Rejected") setJobs((old) => old.map((x) => x.id === j.id ? { ...x, status: "In progress" } : x)); void runJob(j.id); }}>{busy ? "Working…" : j.status === "Rejected" ? "Revise & regenerate" : "Generate work"}</button>}{j.status === "Submitted" && <button className="secondary-button compact-button" onClick={() => { setReviewNote(j.reviewNote ?? ""); setSelectedJobId(j.id); }}>Review work</button>}{j.status === "Rejected" && <button className="secondary-button compact-button" onClick={() => { setReviewNote(j.reviewNote ?? ""); setSelectedJobId(j.id); }}>View feedback</button>}{j.status === "Approved" && <span className="approved-check"><CheckCheck size={16} /> Complete</span>}{j.status === "Queued" && <button className="icon-button subtle" title="Delete job" aria-label={"Delete " + j.title} onClick={() => deleteJob(j.id)}>×</button>}</div>; })}{filteredJobs.length === 0 && <div className="empty-state">No jobs match these filters.</div>}</div></div>}
+        {page === "Jobs & approvals" && <div className="page-wrap"><div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> Operations</div><h1>Jobs & approvals</h1><p>Track delegated work and review submitted results.</p></div></div><div className="job-filters"><span>{jobs.length} total jobs</span><span className="filter-pill">{jobs.filter((j) => j.status === "Queued").length} queued</span><span className="filter-pill review">{jobs.filter((j) => j.status === "Submitted").length} awaiting review</span><span className="filter-pill">{jobs.filter((j) => j.status === "Rejected").length} revisions</span></div><div className="job-toolbar"><label className="job-search"><Search size={15} /><input value={jobSearch} onChange={(e) => setJobSearch(e.target.value)} placeholder="Search jobs, details, employees…" /></label><select value={jobStatusFilter} onChange={(e) => setJobStatusFilter(e.target.value)} aria-label="Filter jobs by status">{["All statuses", "Queued", "In progress", "Submitted", "Rejected", "Approved"].map((status) => <option key={status}>{status}</option>)}</select></div><div className="panel all-jobs">{filteredJobs.map((j) => { const emp = employeeMap.get(j.employeeId); return <div className="all-job-row" key={j.id}><span className="avatar">{initials(emp?.name ?? "AI")}</span><div className="all-job-copy"><strong>{j.title}</strong><small>Assigned to {emp?.name ?? "Unassigned"} · {new Date(j.created).toLocaleString()} · {j.priority}{j.description ? " · " + j.description : ""}</small></div><span className={"job-status " + j.status.toLowerCase().replace(" ", "-")}>{j.status}</span>{j.status === "Queued" && <button className="secondary-button compact-button" onClick={() => startJob(j.id)}>Start job</button>}{(j.status === "In progress" || j.status === "Rejected") && <button className="secondary-button compact-button" disabled={busy} onClick={() => { if (j.status === "Rejected") setJobs((old) => old.map((x) => x.id === j.id ? { ...x, status: "In progress", updatedAt: new Date().toISOString() } : x)); void runJob(j.id); }}>{busy ? "Working…" : j.status === "Rejected" ? "Revise & regenerate" : "Generate work"}</button>}{j.status === "Submitted" && <button className="secondary-button compact-button" onClick={() => { setReviewNote(j.reviewNote ?? ""); setSelectedJobId(j.id); }}>Review work</button>}{j.status === "Rejected" && <button className="secondary-button compact-button" onClick={() => { setReviewNote(j.reviewNote ?? ""); setSelectedJobId(j.id); }}>View feedback</button>}{j.status === "Approved" && <span className="approved-check"><CheckCheck size={16} /> Complete</span>}{j.status === "Queued" && <button className="icon-button subtle" title="Delete job" aria-label={"Delete " + j.title} onClick={() => deleteJob(j.id)}>×</button>}</div>; })}{filteredJobs.length === 0 && <div className="empty-state">No jobs match these filters.</div>}</div></div>}
         {page === "Settings" && <div className="page-wrap settings-page"><div className="page-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> Configuration</div><h1>Settings</h1><p>Configure how your AI team works and what it can access.</p></div><span className="saved-badge"><Check size={13} /> {demoMode ? "Session only" : "Saved automatically"}</span></div><div className="settings-layout"><section className="panel settings-content">
           {activeSettings === "General" && <><h2>General preferences</h2><p className="settings-intro">Manage the basics for {company.name}.</p><label className="field-label">Company name<input value={company.name} onChange={(e) => { const updated = { ...company, name: e.target.value }; setCompany(updated); setCompanies((old) => old.map((item) => item.id === updated.id ? updated : item)); }} /></label>{!demoMode && (memberRole === "owner" || memberRole === "admin") && <div className="settings-info-row"><div><strong>Team access</strong><small>Invite a teammate by email. The link is limited to that email and expires in seven days.</small></div><button className="secondary-button compact-button" onClick={() => { setInviteUrl(""); setInviteEmail(""); setShowInviteForm(true); }}>Invite member</button></div>}<div className="settings-info-row"><div><strong>Data storage</strong><small>{demoMode ? "Changes remain in this session and are discarded when you exit." : "Workspace data is stored in Supabase and shared with authorised company members."}</small></div><span className={"setting-pill " + (demoMode ? "" : "green-pill")}>{demoMode ? "Session only" : "Cloud"}</span></div></>}
           {activeSettings === "Security" && <><h2>Security & permissions</h2><p className="settings-intro">Keep sensitive work under control.</p><div className="settings-info-row"><div><strong>Job approval policy</strong><small>{settings.approvalRequired ? "New assignments wait for approval before starting." : "New assignments can start without the approval gate; generation still requires a manual action."}</small></div><button className="secondary-button compact-button" onClick={() => setActiveSettings("Automation & limits")}>Change policy</button></div><div className="settings-info-row"><div><strong>External actions</strong><small>External publishing and connector writes should require explicit approval.</small></div><span className="setting-pill">Approval gated</span></div><div className="settings-info-row"><div><strong>Credentials</strong><small>Provider secrets must never be placed in frontend code. Use a server-side proxy for shared/public deployments.</small></div><span className="setting-pill">Protected</span></div></>}
@@ -1119,7 +1372,7 @@ export default function App() {
     {toast && <div className="toast"><Check size={15} />{toast}</div>}
     {showHelp && <div className="modal-backdrop" onClick={() => setShowHelp(false)}><section className="modal help-modal" role="dialog" aria-modal="true" aria-labelledby="help-modal-title" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setShowHelp(false)} aria-label="Close help">×</button><span className="modal-kicker"><CircleHelp size={14} /> QUICK GUIDE</span><h2 id="help-modal-title">How AutoBusiness works</h2><div className="help-step"><strong>1. Talk to your team</strong><p>Private and group conversations share relevant workspace chat and assignment context with participating employees.</p></div><div className="help-step"><strong>2. Delegate meaningful work</strong><p>Employees can choose to reply or open an assignment. New assignments appear in Jobs & approvals.</p></div><div className="help-step"><strong>3. Review before approving</strong><p>Open submitted work, request a revision with feedback, or approve it to complete the job.</p></div><div className="help-step"><strong>4. Configure access carefully</strong><p>Provider keys are stored in this browser. Autonomous agents require an OpenRouter key and run while the authenticated workspace remains open; they pause when the page is closed. True server-side 24/7 operation needs a separately deployed background worker.</p></div><div className="work-modal-actions"><button className="primary-button" onClick={() => setShowHelp(false)}>Got it</button><button className="secondary-button" onClick={() => { setShowHelp(false); changePage("Settings"); }}>Open settings</button></div></section></div>}
     {profileEmployeeId && (() => { const person = employeeMap.get(profileEmployeeId); if (!person) return null; return <div className="modal-backdrop" onClick={() => setProfileEmployeeId(null)}><section className="modal employee-quick-profile" role="dialog" aria-modal="true" aria-labelledby="quick-profile-title" onClick={(e) => e.stopPropagation()}><button type="button" className="modal-close" onClick={() => setProfileEmployeeId(null)} aria-label="Close employee profile">×</button><div className="employee-profile-head"><div className="avatar large">{initials(person.name)}</div><div className="employee-profile-title"><h2 id="quick-profile-title">{person.name}</h2><p>{person.role}</p><span className={"presence " + person.status.toLowerCase().replace(" ", "-")}><i />{person.status}</span></div></div><div className="detail-divider" /><div className="detail-section-title">DEPARTMENT</div><p className="profile-value">{departmentPath(person.deptId)}</p><div className="detail-section-title">REPORTING LINE</div><p className="profile-value">Reports to {managerNameFor(person.managerId)}</p>{employees.filter((employee) => employee.managerId === person.id).length > 0 && <><div className="detail-section-title">DIRECT REPORTS</div>{employees.filter((employee) => employee.managerId === person.id).map((employee) => <button className="profile-report-row" key={employee.id} onClick={() => setProfileEmployeeId(employee.id)}><span className="avatar tiny">{initials(employee.name)}</span><span><strong>{employee.name}</strong><small>{employee.role}</small></span><ChevronRight size={14} /></button>)}</>}<div className="detail-section-title">CURRENT WORK</div><p className="profile-value">{person.task || "No active task"}</p><div className="detail-section-title">OPEN JOBS</div>{jobs.filter((j) => j.employeeId === person.id && ["Queued", "In progress", "Submitted"].includes(j.status)).map((j) => <div className="employee-job-mini" key={j.id}><span className="employee-job-copy"><strong>{j.title}</strong><small>{j.status}</small></span></div>)}{!jobs.some((j) => j.employeeId === person.id && ["Queued", "In progress", "Submitted"].includes(j.status)) && <p className="profile-value">No open jobs.</p>}<div className="work-modal-actions"><button className="secondary-button" onClick={() => setProfileEmployeeId(null)}>Close</button><button className="primary-button" onClick={() => { setProfileEmployeeId(null); setSelectedEmployee(person.id); setPage("Management"); }}><Users size={14} /> Open full profile</button><button className="secondary-button" onClick={() => { setProfileEmployeeId(null); setPage("Communication"); setMobileContextOpen(false); void openChatWith(person.id); }}>Open chat</button></div></section></div>; })()}
-    {selectedJobId && (() => { const j = jobs.find((item) => item.id === selectedJobId); if (!j) return null; const emp = employeeMap.get(j.employeeId); return <div className="review-page-backdrop" onClick={() => setSelectedJobId(null)}><section className="review-page" role="dialog" aria-modal="true" aria-labelledby="work-modal-title" onClick={(e) => e.stopPropagation()}><header className="review-page-header"><div><span className="modal-kicker"><Inbox size={14} /> DELIVERABLE REVIEW</span><h1 id="work-modal-title">{j.title}</h1><p>Assigned to {emp?.name ?? "Unassigned"} · {j.status} · {j.priority}{j.submittedAt ? " · Submitted " + new Date(j.submittedAt).toLocaleString() : ""}</p></div><button type="button" className="review-close-button" onClick={() => setSelectedJobId(null)} aria-label="Close work review">×</button></header><div className="review-page-scroll"><div className="review-layout"><main className="review-document"><div className="review-document-top"><span>DOCUMENT PREVIEW</span><span>Markdown</span></div>{j.description && <div className="work-job-brief"><strong>Job brief</strong><p>{j.description}</p></div>}{j.status === "Rejected" && j.reviewNote && <div className="review-feedback"><strong>Requested changes</strong><p>{j.reviewNote}</p></div>}<article className="work-result">{j.result?.trim() ? <MarkdownPreview content={j.result} /> : <p>No deliverable has been generated yet. Start the job and generate work before reviewing or approving it.</p>}</article></main><aside className="review-sidebar"><h2>Review details</h2><div className="review-side-row"><span>Owner</span><strong>{emp?.name ?? "Unassigned"}</strong></div><div className="review-side-row"><span>Status</span><strong>{j.status}</strong></div><div className="review-side-row"><span>Priority</span><strong>{j.priority}</strong></div><div className="review-side-row"><span>Created</span><strong>{new Date(j.created).toLocaleDateString()}</strong></div>{j.status === "Submitted" && <label className="review-note-field">Revision feedback (required to send back)<textarea rows={5} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Explain what needs to change, with specific, actionable feedback." /></label>}{j.status === "Rejected" && <label className="review-note-field">Update revision feedback<textarea rows={5} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="What should the employee change?" /></label>}</aside></div></div><footer className="review-page-footer"><button className="secondary-button" onClick={() => setSelectedJobId(null)}>Close</button>{j.status === "In progress" && <button className="primary-button" disabled={busy} onClick={() => void runJob(j.id)}>{busy ? "Generating…" : "Generate work"}</button>}{j.status === "Rejected" && <button className="primary-button" disabled={busy} onClick={() => { setJobs((old) => old.map((x) => x.id === j.id ? { ...x, status: "In progress", reviewNote: reviewNote.trim() || x.reviewNote } : x)); void runJob(j.id, reviewNote.trim() || j.reviewNote); }}>{busy ? "Generating…" : "Regenerate work"}</button>}{j.status === "Submitted" && <><button className="secondary-button" onClick={() => requestRevision(j.id)}>Request revision</button><button className="primary-button" disabled={!j.result?.trim()} onClick={() => { if (j.result?.trim()) { approveJob(j.id); setSelectedJobId(null); } }}><Check size={14} /> Approve reviewed work</button></>}</footer></section></div>; })()}
+    {selectedJobId && (() => { const j = jobs.find((item) => item.id === selectedJobId); if (!j) return null; const emp = employeeMap.get(j.employeeId); return <div className="review-page-backdrop" onClick={() => setSelectedJobId(null)}><section className="review-page" role="dialog" aria-modal="true" aria-labelledby="work-modal-title" onClick={(e) => e.stopPropagation()}><header className="review-page-header"><div><span className="modal-kicker"><Inbox size={14} /> DELIVERABLE REVIEW</span><h1 id="work-modal-title">{j.title}</h1><p>Assigned to {emp?.name ?? "Unassigned"} · {j.status} · {j.priority}{j.submittedAt ? " · Submitted " + new Date(j.submittedAt).toLocaleString() : ""}</p></div><button type="button" className="review-close-button" onClick={() => setSelectedJobId(null)} aria-label="Close work review">×</button></header><div className="review-page-scroll"><div className="review-layout"><main className="review-document"><div className="review-document-top"><span>DOCUMENT PREVIEW</span><span>Markdown</span></div>{j.description && <div className="work-job-brief"><strong>Job brief</strong><p>{j.description}</p></div>}{j.status === "Rejected" && j.reviewNote && <div className="review-feedback"><strong>Requested changes</strong><p>{j.reviewNote}</p></div>}<article className="work-result">{j.result?.trim() ? <MarkdownPreview content={j.result} /> : <p>No deliverable has been generated yet. Start the job and generate work before reviewing or approving it.</p>}</article></main><aside className="review-sidebar"><h2>Review details</h2><div className="review-side-row"><span>Owner</span><strong>{emp?.name ?? "Unassigned"}</strong></div><div className="review-side-row"><span>Status</span><strong>{j.status}</strong></div><div className="review-side-row"><span>Priority</span><strong>{j.priority}</strong></div><div className="review-side-row"><span>Created</span><strong>{new Date(j.created).toLocaleDateString()}</strong></div>{j.status === "Submitted" && <label className="review-note-field">Revision feedback (required to send back)<textarea rows={5} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Explain what needs to change, with specific, actionable feedback." /></label>}{j.status === "Rejected" && <label className="review-note-field">Update revision feedback<textarea rows={5} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="What should the employee change?" /></label>}</aside></div></div><footer className="review-page-footer"><button className="secondary-button" onClick={() => setSelectedJobId(null)}>Close</button>{j.status === "In progress" && <button className="primary-button" disabled={busy} onClick={() => void runJob(j.id)}>{busy ? "Generating…" : "Generate work"}</button>}{j.status === "Rejected" && <button className="primary-button" disabled={busy} onClick={() => { setJobs((old) => old.map((x) => x.id === j.id ? { ...x, status: "In progress", reviewNote: reviewNote.trim() || x.reviewNote, updatedAt: new Date().toISOString() } : x)); void runJob(j.id, reviewNote.trim() || j.reviewNote); }}>{busy ? "Generating…" : "Regenerate work"}</button>}{j.status === "Submitted" && <><button className="secondary-button" onClick={() => requestRevision(j.id)}>Request revision</button><button className="primary-button" disabled={!j.result?.trim()} onClick={() => { if (j.result?.trim()) { approveJob(j.id); setSelectedJobId(null); } }}><Check size={14} /> Approve reviewed work</button></>}</footer></section></div>; })()}
     {showJobForm && <div className="modal-backdrop" onClick={() => setShowJobForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createJob}><button type="button" className="modal-close" onClick={() => setShowJobForm(false)}>×</button><span className="modal-kicker"><Inbox size={14} /> JOB ASSIGNMENT</span><h2>Assign a job</h2><p>Give an employee a clear outcome to work towards.</p><label>Job title<input autoFocus value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} placeholder="e.g. Draft a launch plan" minLength={2} maxLength={240} required /></label><label>Job brief / acceptance criteria<textarea rows={4} value={jobDescription} onChange={(e) => setJobDescription(e.target.value)} maxLength={8000} placeholder="Describe the expected deliverable, audience, constraints, and what a successful result includes." /></label><label>Priority<select value={jobPriority} onChange={(e) => setJobPriority(e.target.value as "Normal" | "Urgent")}><option>Normal</option><option>Urgent</option></select></label><label>Assign to<select value={jobEmployee} onChange={(e) => setJobEmployee(e.target.value)}>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}</select></label><div className="modal-note"><ShieldCheck size={15} />{settings.approvalRequired ? "This job will be queued for approval before it can start." : "This job will start without the approval gate; AI generation still requires a manual action."}</div><button className="primary-button modal-submit" type="submit">Create job <ArrowUpRight size={15} /></button></form></div>}
     {showEmployeeForm && <div className="modal-backdrop" onClick={() => setShowEmployeeForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createEmployee}><button type="button" className="modal-close" onClick={() => setShowEmployeeForm(false)}>×</button><span className="modal-kicker"><Users size={14} /> TEAM SETUP</span><h2>Add an employee</h2><p>Create a new AI teammate for this workspace.</p><label>Full name<input autoFocus value={employeeName} onChange={(e) => setEmployeeName(e.target.value)} placeholder="e.g. Sam Taylor" required /></label><label>Role<input value={employeeRole} onChange={(e) => setEmployeeRole(e.target.value)} placeholder="e.g. Research analyst" required /></label><label>Department<select value={newEmployeeDept} onChange={(e) => setNewEmployeeDept(e.target.value)} required><option value="" disabled>Select a department</option>{depts.map((d) => <option key={d.id} value={d.id}>{departmentPath(d.id)}</option>)}</select></label><label>Reports to<select value={newEmployeeManager} onChange={(e) => setNewEmployeeManager(e.target.value)} required><option value="" disabled>Choose a manager</option><option value="__none__">You · top of hierarchy</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} — {employee.role}</option>)}</select><small className="input-help">This determines their manager and reporting line.</small></label><button className="primary-button modal-submit" type="submit">Create employee <Plus size={15} /></button></form></div>}
     {showDepartmentForm && <div className="modal-backdrop" onClick={() => setShowDepartmentForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={createDepartment}><button type="button" className="modal-close" onClick={() => setShowDepartmentForm(false)} aria-label="Close department form">×</button><span className="modal-kicker"><Building2 size={14} /> ORGANISATION DESIGN</span><h2>Add a department</h2><p>Create a top-level department or place it under another department to build any number of nested levels.</p><label>Department name<input autoFocus value={departmentName} onChange={(e) => setDepartmentName(e.target.value)} placeholder="e.g. Research" minLength={1} maxLength={100} required /></label><label>Parent department<select value={newDepartmentParent} onChange={(e) => setNewDepartmentParent(e.target.value)}><option value="__root__">No parent · top-level department</option>{depts.map((department) => <option key={department.id} value={department.id}>{departmentPath(department.id)}</option>)}</select></label><button className="primary-button modal-submit" type="submit">Create department <Plus size={15} /></button></form></div>}

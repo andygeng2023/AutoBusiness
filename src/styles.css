@@ -418,3 +418,5 @@
 .message-bubble .markdown-preview .markdown-list-item.task input{width:14px;height:14px;flex:0 0 14px;margin:4px 0 0;accent-color:var(--accent,#315efb)}
 .message-bubble .markdown-preview a{overflow-wrap:anywhere}
 .message-bubble .markdown-preview a:hover{opacity:.82}
+
+.streaming-bubble{position:relative}.streaming-cursor{display:inline-block;width:2px;height:1em;margin-left:3px;vertical-align:-.12em;background:currentColor;animation:stream-caret 1s steps(2,start) infinite}@keyframes stream-caret{to{visibility:hidden}}
