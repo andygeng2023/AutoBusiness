@@ -125,7 +125,7 @@ const requestOpenRouter = async (model: string, messages: Array<{ role: string; 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + apiKey.trim(), "Content-Type": "application/json", "HTTP-Referer": window.location.origin, "X-Title": "AutoBusiness" }, body: JSON.stringify({ model, messages, temperature: 0.4, stream: true }) });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload?.error?.message || \`OpenRouter request failed (\${response.status})\`);
+    throw new Error(payload?.error?.message || `OpenRouter request failed (${response.status})`);
   }
   if (!response.body) throw new Error("Streaming is unavailable for this response.");
   const reader = response.body.getReader();
