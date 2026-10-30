@@ -797,64 +797,158 @@ export default function App() {
   };
   useEffect(() => {
     if (demoMode || !user || !company || loadedCompanyId !== company.id || !settings.autoRun || !openRouterKey.trim() || !settings.connectors.includes("OpenRouter")) return;
-    let cancelled = false;
-    const tick = async () => {
-      if (cancelled || busy || autoRunJobLockRef.current || teamPulseLockRef.current) return;
-      const nextJob = jobs.filter((job) => job.status === "In progress").sort((a, b) => {
-        const aTime = Date.parse(a.created); const bTime = Date.parse(b.created);
-        return (Number.isNaN(aTime) ? 0 : aTime) - (Number.isNaN(bTime) ? 0 : bTime);
-      })[0];
-      if (nextJob) {
-        autoRunJobLockRef.current = true;
-        try { await runJob(nextJob.id, undefined, { background: true }); }
-        finally { autoRunJobLockRef.current = false; }
-        return;
-      }
-      const activeJobs = jobs.filter((job) => ["Queued", "In progress", "Submitted", "Rejected"].includes(job.status));
-      const activeGoals = goals.filter((goal) => goal.status === "active" || goal.status === "planned");
-      if (Date.now() - lastTeamPulseRef.current < 5 * 60 * 1000) return;
-      const activeEmployees = employees.filter((employee) => employee.status !== "Paused");
-      if (activeEmployees.length < 2) return;
+    if (busy || autoRunJobLockRef.current || teamPulseLockRef.current) return;
+
+    const messageEvents = conversations.flatMap((conversation) => conversation.messages
+      .filter((message) => message.from !== "system")
+      .map((message) => ({
+        key: "message:" + message.id,
+        at: Date.parse(message.createdAt || "") || 0,
+        kind: "message" as const,
+        conversation,
+        message
+      })));
+    const jobEvents = jobs.filter((job) => ["Queued", "In progress", "Submitted", "Rejected", "Approved"].includes(job.status))
+      .map((job) => ({
+        key: "job:" + job.id + ":" + job.status + ":" + (job.submittedAt || job.created),
+        at: Date.parse(job.submittedAt || job.created) || 0,
+        kind: "job" as const,
+        job
+      }));
+    const latestEvent = [...messageEvents, ...jobEvents].sort((a, b) => b.at - a.at)[0];
+    if (!latestEvent) return;
+
+    // Treat existing workspace activity as history on the initial render.
+    if (!lastTeamPulseRef.current) {
+      lastTeamPulseRef.current = latestEvent.key;
+      return;
+    }
+    if (latestEvent.key === lastTeamPulseRef.current) return;
+
+    // A new message or job state change starts one decision. A useful reply becomes
+    // the next event. Silence ends the chain; the ceiling prevents runaway loops.
+    if (teamChainRef.current >= 8) {
+      lastTeamPulseRef.current = latestEvent.key;
+      teamChainRef.current = 0;
+      return;
+    }
+
+    const activeEmployees = employees.filter((employee) => employee.status !== "Paused");
+    if (!activeEmployees.length) return;
+
+    let destination: Conversation | null = null;
+    let actor: Employee | undefined;
+    let eventDescription = "";
+
+    if (latestEvent.kind === "message") {
+      destination = latestEvent.conversation;
+      const members = latestEvent.conversation.members
+        .map((id) => employeeMap.get(id))
+        .filter((employee): employee is Employee => Boolean(employee) && employee?.status !== "Paused");
+      if (!members.length) return;
+      const sourceIndex = members.findIndex((employee) => employee.id === latestEvent.message.from);
+      if (latestEvent.message.from === "you") actor = members[0];
+      else if (sourceIndex >= 0 && members.length > 1) actor = members[(sourceIndex + 1) % members.length];
+      else actor = members.find((employee) => employee.id !== latestEvent.message.from);
+      if (!actor) return;
+      eventDescription = "A new message in " + latestEvent.conversation.name + " from " +
+        (latestEvent.message.from === "you" ? "the company owner" : employeeMap.get(latestEvent.message.from)?.name || "a colleague") +
+        ":\n" + latestEvent.message.text;
+    } else {
+      const job = latestEvent.job;
+      destination = null;
+      const owner = employeeMap.get(job.employeeId);
+      if (job.status === "Rejected") actor = owner;
+      else if (job.status === "Submitted" || job.status === "Approved") {
+        actor = (owner?.managerId ? employeeMap.get(owner.managerId) : undefined)
+          ?? activeEmployees.find((employee) => employee.id !== owner?.id);
+      } else actor = owner;
+      if (!actor || actor.status === "Paused") return;
+      eventDescription = "Assignment activity: \"" + job.title + "\" is now " + job.status +
+        ". Assigned employee: " + (owner?.name || "Unassigned") +
+        ". Brief: " + (job.description || "No brief supplied.") +
+        (job.reviewNote ? "\nReview feedback: " + job.reviewNote : "") +
+        (job.result && job.status === "Submitted" ? "\nSubmitted deliverable:\n" + job.result.slice(0, 5000) : "");
+    }
+
+    if (!actor) return;
+    const processEvent = async () => {
       teamPulseLockRef.current = true;
+      const eventKey = latestEvent.key;
+      lastTeamPulseRef.current = eventKey;
       try {
-        const room = await ensureCollaborationRoom();
-        if (!room) return;
-        if (!room.messages.some((message) => message.from === "you" && Date.parse(message.createdAt) > lastTeamPulseRef.current)) return;
-        lastTeamPulseRef.current = Date.now();
-        const tickIndex = Math.floor(Date.now() / (5 * 60 * 1000)) % activeEmployees.length;
-        const actor = activeEmployees[tickIndex];
-        const peer = (actor.managerId ? employeeMap.get(actor.managerId) : undefined)
-          ?? activeEmployees.find((employee) => employee.managerId === actor.id)
-          ?? activeEmployees.find((employee) => employee.id !== actor.id);
-        if (!peer || actor.id === peer.id) return;
-        const jobContext = activeJobs.slice(0, 8).map((job) => "- " + job.title + " (" + job.status + ", owner: " + (employeeMap.get(job.employeeId)?.name ?? "unassigned") + "): " + (job.description || "No brief supplied")).join("\n");
-        const goalContext = activeGoals.slice(0, 8).map((goal) => "- " + goal.title + " (" + goal.progress + "%): " + goal.description).join("\n");
-        const priorTeamChat = room.messages.slice(-8).map((message) => (employeeMap.get(message.from)?.name ?? message.from) + ": " + message.text).join("\n");
-        const actorModel = freeModels.some((item) => item.id === actor.model) ? actor.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
-        const peerModel = freeModels.some((item) => item.id === peer.model) ? peer.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
-        const update = (await requestOpenRouter(actorModel, [
-          { role: "system", content: "You are " + actor.name + ", " + actor.role + " at " + company.name + ". You are an autonomous teammate who can coordinate with coworkers whenever you have a useful reason to do so. Your manager is " + managerNameFor(actor.managerId) + ". Use only the supplied workspace facts. Behave like a real colleague: continue an unfinished thread, ask " + peer.name + " a specific question, answer a previous question, offer a concrete contribution, challenge an assumption constructively, or share a short work update with a rationale. You may send multiple messages across a discussion, and you may also stay silent when there is nothing useful to add. Do not invent progress, decisions, metrics, or actions. Avoid generic small talk and repeated check-ins. Return exactly [NO_UPDATE] when you choose not to send a message. Keep under 120 words." },
-          { role: "user", content: "ACTIVE JOBS:\n" + (jobContext || "No open jobs.") + "\n\nGOALS:\n" + (goalContext || "No active goals.") + "\n\nRECENT TEAM COLLABORATION:\n" + (priorTeamChat || "No previous collaboration messages.") + "\n\nWrite a concise internal update that states the action or next step and a short rationale, then invites a concrete response from the colleague. Active jobs: " + (activeJobs.length ? "listed above" : "none currently active") + ". Return [NO_UPDATE] only if no useful coordination is possible." }
-        ], openRouterKey)).trim();
-        if (!update || /^\[NO_UPDATE\]$/i.test(update) || /^NO_ACTION$/i.test(update)) return;
-        const reply = (await requestOpenRouter(peerModel, [
-          { role: "system", content: "You are " + peer.name + ", " + peer.role + " collaborating with " + actor.name + ". Decide independently whether to respond now. You may answer the question, contribute specialist work, ask a useful follow-up, disagree constructively with reasons, or stay silent. Use only the provided facts. Do not invent progress or claim actions were completed. If you have no useful contribution, return exactly [NO_UPDATE]. Keep under 100 words." },
-          { role: "user", content: "ACTIVE JOBS:\n" + (jobContext || "No open jobs.") + "\n\nACTIVE GOALS:\n" + (goalContext || "No active goals.") + "\n\n" + actor.name + " wrote:\n" + update }
-        ], openRouterKey)).trim();
-        const now = new Date().toISOString();
-        const entries: Message[] = [{ id: crypto.randomUUID(), from: actor.id, text: update.slice(0, 2000), time: nowTime(), createdAt: now }];
-        if (reply && !/^\[NO_UPDATE\]$/i.test(reply) && !/^NO_ACTION$/i.test(reply)) entries.push({ id: crypto.randomUUID(), from: peer.id, text: reply.slice(0, 1600), time: nowTime(), createdAt: new Date(Date.now() + 1).toISOString() });
-        appendAgentMessages(room, entries);
+        if (latestEvent.kind === "job") destination = await ensureCollaborationRoom();
+        if (!destination) return;
+
+        const model = freeModels.some((item) => item.id === actor?.model)
+          ? actor.model
+          : freeModels[0]?.id ?? fallbackFreeModels[0].id;
+        const recentHistory = destination.messages.slice(-12).map((message) =>
+          (message.from === "you" ? "Owner" : employeeMap.get(message.from)?.name || "Colleague") + ": " + message.text
+        ).join("\n\n");
+        const prompt = [
+          {
+            role: "system",
+            content: "You are " + actor.name + ", " + actor.role + " at " + company.name +
+              ". Tone: " + actor.tone + ". Instructions: " + (actor.instructions || "Be accurate, useful and professional.") +
+              ". Decide independently whether you have a useful contribution to the latest event. You may answer, ask a relevant question, review submitted work, suggest a concrete next action, or stay silent. Use only supplied facts. Do not invent progress or claim actions you have not completed. Reply in natural Markdown or plain text, never JSON. If there is nothing useful to add, return exactly [NO_REPLY]. Avoid filler acknowledgements."
+          },
+          {
+            role: "user",
+            content: "LATEST WORKSPACE EVENT:\n" + eventDescription +
+              "\n\nRECENT CONVERSATION:\n" + (recentHistory || "No previous conversation.") +
+              "\n\nOPEN ASSIGNMENTS:\n" + (jobs.filter((job) => job.status !== "Approved").slice(0, 8)
+                .map((job) => "- " + job.title + " (" + job.status + ")").join("\n") || "None")
+          }
+        ];
+
+        const draftKey = destination.id + ":" + actor.id;
+        let streamed = "";
+        setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
+        const response = await requestOpenRouter(model, prompt, openRouterKey, (chunk) => {
+          streamed += chunk;
+          const visible = streamed.trimStart();
+          if (!"[[NO_REPLY]]".startsWith(visible)) {
+            setLiveChatDrafts((old) => ({ ...old, [draftKey]: streamed }));
+          }
+        });
+        setLiveChatDrafts((old) => {
+          const next = { ...old };
+          delete next[draftKey];
+          return next;
+        });
+
+        const reply = response.trim();
+        if (!reply || reply === "[[NO_REPLY]]") {
+          teamChainRef.current = 0;
+          return;
+        }
+
+        const message: Message = {
+          id: crypto.randomUUID(),
+          from: actor.id,
+          text: reply,
+          time: nowTime(),
+          createdAt: new Date().toISOString(),
+          jobId: latestEvent.kind === "job" ? latestEvent.job.id : undefined
+        };
+        appendAgentMessages(destination, [message]);
+        teamChainRef.current += 1;
+        if (teamChainRef.current >= 8) {
+          lastTeamPulseRef.current = "message:" + message.id;
+          teamChainRef.current = 0;
+        }
       } catch (error) {
-        notify("Background collaboration could not run: " + describeError(error, "Unknown AI error"));
+        notify("Event-driven collaboration could not run: " + describeError(error, "Unknown AI error"));
+        teamChainRef.current = 0;
       } finally {
+        setLiveChatDrafts({});
         teamPulseLockRef.current = false;
+        setConversations((old) => old.slice());
       }
     };
-    const timer = window.setInterval(() => { void tick(); }, 60 * 1000);
-    void tick();
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [demoMode, user?.id, company?.id, loadedCompanyId, settings.autoRun, settings.connectors, openRouterKey, jobs, employees, conversations, goals, freeModels, busy]);
+    void processEvent();
+  }, [demoMode, user?.id, company?.id, loadedCompanyId, settings.autoRun, settings.connectors, openRouterKey, jobs, employees, conversations, freeModels, busy]);
 
   const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
   const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress" } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
