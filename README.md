@@ -11,7 +11,7 @@ AutoBusiness is a multi-company workspace for configuring AI employees, assignin
 - Row-level security for workspace data; unauthenticated access to workspace tables is revoked. Private employee conversations and their messages are limited to the creating member, while group chats are available to company members.
 - Real dashboard counts based on stored employee, job, deliverable, and goal records rather than seeded example metrics.
 - Goal creation and progress tracking saved to the company workspace.
-- Job assignment, deliverable generation through Puter.js, revision requests, and approval.
+- Job assignment, deliverable generation through the ChatGPT Playwright browser worker, revision requests, and approval.
 - Responsive desktop and mobile layouts.
 
 New companies are created with a starter AI team and departments. Jobs, conversations, goals, and activity start empty; no fake company results are seeded into a new workspace.
@@ -38,7 +38,7 @@ The app currently loads shared data when a workspace is opened; live push update
 
 ## AI provider and limitations
 
-Puter.js is loaded in the browser and is used for private employee chat replies and job deliverables. Availability and model access depend on the Puter.js environment and its user authorization. AI provider token usage and billing are not exposed by this browser integration, so the dashboard reports saved deliverables and approved jobs rather than invented usage units.
+Private employee chat replies and job deliverables use the separately deployed ChatGPT Playwright browser worker. A manually authenticated ChatGPT session is stored on the worker host, not in the browser app. AI provider token usage and billing are not exposed by this browser integration, so the dashboard reports saved deliverables and approved jobs rather than invented usage units.
 
 The connector and automation settings are preferences, not integrations with external services. GitHub, Slack, Google Drive, and web-search actions are not wired up. Jobs are run when a user explicitly starts generation; there is no always-on background worker.
 
