@@ -553,9 +553,9 @@ export default function App() {
           "\\n\\nUse this as persistent working context. Remember decisions, preferences, commitments, previous results, and feedback; do not claim to remember anything outside this supplied history.";
       };
       const groupMembers = activeConversation.members.map((id) => employeeMap.get(id)).filter((emp): emp is Employee => Boolean(emp) && emp?.status !== "Paused");
-      // Start with one colleague; each reply becomes an event for the next colleague to consider.
+      // Invite every group member to consider the message independently.
       const targets = activeConversation.kind === "group"
-        ? groupMembers.slice(0, 1)
+        ? groupMembers
         : activeConversation.members.length === 1
           ? [employeeMap.get(activeConversation.members[0])].filter((emp): emp is Employee => Boolean(emp))
           : [];
