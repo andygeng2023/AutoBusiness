@@ -121,14 +121,40 @@ const describeError = (error: unknown, fallback: string) => {
   }
   return fallback;
 };
-const requestOpenRouter = async (model: string, messages: Array<{ role: string; content: string }>, apiKey: string): Promise<string> => {
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + apiKey.trim(), "Content-Type": "application/json", "HTTP-Referer": window.location.origin, "X-Title": "AutoBusiness" }, body: JSON.stringify({ model, messages, temperature: 0.4 }) });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.error?.message || `OpenRouter request failed (${response.status})`);
-  const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) return content.map((part: { text?: string }) => part?.text ?? "").join("\n");
-  return "";
+const requestOpenRouter = async (model: string, messages: Array<{ role: string; content: string }>, apiKey: string, onChunk?: (text: string) => void): Promise<string> => {
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + apiKey.trim(), "Content-Type": "application/json", "HTTP-Referer": window.location.origin, "X-Title": "AutoBusiness" }, body: JSON.stringify({ model, messages, temperature: 0.4, stream: true }) });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload?.error?.message || \`OpenRouter request failed (\${response.status})\`);
+  }
+  if (!response.body) throw new Error("Streaming is unavailable for this response.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      const data = frame.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
+      if (!data || data === "[DONE]") continue;
+      try {
+        const payload = JSON.parse(data);
+        const delta = payload?.choices?.[0]?.delta?.content;
+        const token = typeof delta === "string" ? delta : Array.isArray(delta) ? delta.map((part: { text?: string }) => part?.text ?? "").join("") : "";
+        if (token) { result += token; onChunk?.(token); }
+      } catch { /* Ignore non-content SSE frames. */ }
+    }
+  }
+  return result;
+};
+const partialJsonField = (source: string, field: string) => {
+  const match = source.match(new RegExp('"' + field + '"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)'));
+  if (!match) return "";
+  try { return JSON.parse('"' + match[1] + '"'); } catch { return match[1].replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\"/g, '"'); }
 };
 
 declare global { interface Window {} }
@@ -201,6 +227,7 @@ export default function App() {
   const [newChatMembers, setNewChatMembers] = useState<string[]>([]);
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
+  const [liveChatDrafts, setLiveChatDrafts] = useState<Record<string, string>>({});
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [activeSettings, setActiveSettings] = useState("General");
   const [openRouterKey, setOpenRouterKey] = useState(() => window.localStorage.getItem(openRouterKeyName) ?? "");
@@ -522,8 +549,10 @@ export default function App() {
           "\\n\\nPAST AND CURRENT ASSIGNMENTS\\n" + (assignmentHistory || "No earlier assignments.") +
           "\\n\\nUse this as persistent working context. Remember decisions, preferences, commitments, previous results, and feedback; do not claim to remember anything outside this supplied history.";
       };
+      const groupMembers = activeConversation.members.map((id) => employeeMap.get(id)).filter((emp): emp is Employee => Boolean(emp) && emp?.status !== "Paused");
+      // Limit each group turn to two colleagues; others can join when a later message needs their expertise.
       const targets = activeConversation.kind === "group"
-        ? activeConversation.members.map((id) => employeeMap.get(id)).filter((emp): emp is Employee => Boolean(emp) && emp?.status !== "Paused")
+        ? groupMembers.slice(0, 2)
         : activeConversation.members.length === 1
           ? [employeeMap.get(activeConversation.members[0])].filter((emp): emp is Employee => Boolean(emp))
           : [];
@@ -545,7 +574,14 @@ export default function App() {
             { role: "system", content: "You are " + emp.name + ", " + emp.role + " in the " + company?.name + " workspace. Tone: " + emp.tone + ". Custom instructions: " + (emp.instructions || "Be accurate and useful.") + ". Current task: " + (emp.task || "none") + ".\\n" + groupInstruction + "\\nReturn ONLY valid JSON with keys action, reply, title, description. action must be reply, start_job, or ignore. Use start_job when the request requires a substantive deliverable you should own and work on; title should be concise and description should capture the task, constraints, context and success criteria. Use reply for discussion/questions that do not need a tracked deliverable. Use ignore only when you have no useful contribution. In group chat, only employees with a useful role should act. Never claim work is completed before producing it." },
             { role: "user", content: workspaceMemoryFor(emp) + "\\n\\nCURRENT CONVERSATION (" + activeConversation.name + "):\\n" + (dialogue || "(No previous messages.)") + "\\n\\nLATEST REQUEST: " + text + "\\n\\nUse all supplied memory consistently. Do not create duplicate assignments for work already completed or in progress unless the user clearly requests a new one." }
           ];
-          const raw = await requestOpenRouter(model, prompt, openRouterKey);
+          const draftKey = activeConversation.id + ":" + emp.id;
+          let rawStream = "";
+          setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
+          const raw = await requestOpenRouter(model, prompt, openRouterKey, (chunk) => {
+            rawStream += chunk;
+            const partial = partialJsonField(rawStream, "reply");
+            if (partial) setLiveChatDrafts((old) => ({ ...old, [draftKey]: partial }));
+          });
           let decision: { action?: string; reply?: string; title?: string; description?: string } = {};
           try {
             const json = raw.trim().replace(/^\x60\x60\x60(?:json)?\s*/i, "").replace(/\s*\x60\x60\x60$/, "");
@@ -576,6 +612,7 @@ export default function App() {
         }
       }));
 
+      setLiveChatDrafts({});
       const responses: Message[] = replies
         .filter(({ answer }) => answer && answer !== "[[NO_REPLY]]")
         .map(({ emp, answer, jobId }) => ({ id: crypto.randomUUID(), from: emp.id, text: answer, time: nowTime(), createdAt: new Date().toISOString(), jobId }));
@@ -1082,7 +1119,8 @@ export default function App() {
           <div className="chat-window panel"><div className="chat-main-head">{activeConversation && <><span className={"chat-avatar " + (activeConversation.kind === "group" ? "team-avatar" : "")}>{activeConversation.kind === "group" ? <Users size={17} /> : initials(activeConversation.name)}</span><div><strong>{activeConversation.name}</strong><small>{activeConversation.kind === "group" ? activeConversation.members.length + " team members" : "Private conversation"}</small></div></>}<button className={"icon-button subtle " + (showChatDetails ? "active" : "")} title="Conversation details and team directory" onClick={() => setShowChatDetails((open) => !open)}><MoreHorizontal size={18} /></button></div>
             {showChatDetails && <aside className="chat-details-panel"><div className="chat-details-title"><div><strong>People in this chat</strong><small>{activeConversation?.members.length ?? 0} employees</small></div><button className="tiny-icon" onClick={() => setShowChatDetails(false)} aria-label="Close people panel">×</button></div>{activeConversation?.members.length ? activeConversation.members.map((memberId) => employeeMap.get(memberId)).filter((e): e is Employee => Boolean(e) && (e!.name + " " + e!.role).toLowerCase().includes(search.toLowerCase())).map((e) => <button className="chat-detail-person" key={e.id} onClick={() => { setProfileEmployeeId(e.id); setShowChatDetails(false); }}><span className="avatar small">{initials(e.name)}</span><span><strong>{e.name}</strong><small>{e.role} · reports to {managerNameFor(e.managerId)}</small></span><ChevronRight size={15} /></button>) : <p className="chat-details-empty">No employees are in this conversation.</p>}</aside>}
             <div className="message-stream">{activeConversation?.messages.map((m) => <div key={m.id} className={"message-row " + (m.from === "you" ? "mine" : "")}><span className="avatar tiny">{initials(employeeNameFor(m.from))}</span><div className="message-content"><div className="message-meta"><strong>{employeeNameFor(m.from)}</strong><span>{m.time}</span></div><div className="message-bubble"><MarkdownPreview content={m.text} /></div>{m.jobId && <button className="message-job-link" onClick={() => { changePage("Jobs & approvals"); setSelectedJobId(m.jobId ?? null); }}><Inbox size={13} /> View job and deliverable</button>}</div></div>)}
-              {busy && <div className="typing-indicator"><span /><span /><span /> {activeConversation?.name} is thinking…</div>}
+              {Object.entries(liveChatDrafts).filter(([key, draft]) => key.startsWith((activeConversation?.id ?? "") + ":") && draft).map(([key, draft]) => { const employeeId = key.split(":")[1]; return <div className="message-row" key={key}><span className="avatar tiny">{initials(employeeNameFor(employeeId))}</span><div className="message-content"><div className="message-meta"><strong>{employeeNameFor(employeeId)}</strong><span>typing</span></div><div className="message-bubble streaming-bubble"><MarkdownPreview content={draft} /><span className="streaming-cursor" /></div></div></div>; })}
+              {busy && !Object.keys(liveChatDrafts).some((key) => key.startsWith((activeConversation?.id ?? "") + ":")) && <div className="typing-indicator"><span /><span /><span /> A colleague is deciding whether to contribute…</div>}
               {!activeConversation?.messages.length && <div className="chat-empty"><span className="chat-empty-icon"><MessageCircle size={22} /></span><strong>Start the conversation</strong><p>Send a message. Employees decide whether to reply or open and complete assignments themselves.</p></div>}
             </div>
             <div className="chat-composer-area"><div className="composer-tools"><span>{demoMode ? "Demo messages stay in this session" : "Messages are saved to your cloud workspace"}</span></div><form className="chat-composer" onSubmit={sendMessage}><textarea value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement)?.requestSubmit(); } }} placeholder={"Message " + (activeConversation?.name ?? "your team") + "…"} rows={2} /><button className="send-button" type="submit" disabled={!message.trim()} aria-label="Send message"><Send size={17} /></button></form><small className="composer-hint">Enter to send · Shift + Enter for a new line</small></div>
