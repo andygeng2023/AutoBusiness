@@ -19,7 +19,10 @@ jobs:
         with:
           node-version: 20
       - run: npm install
-      - run: npm run build
+      - name: Build
+        run: npm run build
+        env:
+          VITE_PLAYWRIGHT_SERVICE_URL: ${{ vars.PLAYWRIGHT_SERVICE_URL }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
