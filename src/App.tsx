@@ -61,6 +61,17 @@ type Employee = { id: string; name: string; role: string; deptId: string; manage
 type Dept = { id: string; name: string; parentId?: string };
 type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; updatedAt?: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string; reviewedBy?: string };
 type Message = { id: string; from: string; text: string; time: string; jobId?: string; createdAt?: string; senderUserId?: string };
+const chronologicalMessages = (messages: Message[]): Message[] => messages
+  .map((message, index) => ({ message, index, timestamp: message.createdAt ? Date.parse(message.createdAt) : Number.NaN }))
+  .sort((a, b) => {
+    const aValid = Number.isFinite(a.timestamp);
+    const bValid = Number.isFinite(b.timestamp);
+    if (!aValid && !bValid) return a.index - b.index;
+    if (!aValid) return -1;
+    if (!bValid) return 1;
+    return a.timestamp - b.timestamp || a.index - b.index;
+  })
+  .map(({ message }) => message);
 type Conversation = { id: string; name: string; kind: "private" | "group"; members: string[]; messages: Message[]; createdBy?: string };
 type Company = { id: string; name: string; industry: string; initials: string; color: string; description: string };
 type Goal = { id: string; title: string; description: string; progress: number; dueDate?: string; status: "planned" | "active" | "paused" | "completed"; createdBy?: string };
@@ -593,7 +604,7 @@ export default function App() {
     setBusy(true);
     try {
 
-      const dialogue = activeConversation.messages.map((m) => {
+      const dialogue = chronologicalMessages(activeConversation.messages).map((m) => {
         const speaker = m.from === "you" ? "User" : m.from === "system" ? "System" : employeeMap.get(m.from)?.name ?? "Team member";
         return speaker + ": " + m.text;
       }).join("\\n\\n");
@@ -602,7 +613,7 @@ export default function App() {
       const workspaceMemoryFor = (emp: Employee) => {
         const chatHistory = conversations.flatMap((conversation) => {
           if (!conversation.members.includes(emp.id)) return [];
-          const lines = conversation.messages.map((m) => {
+          const lines = chronologicalMessages(conversation.messages).map((m) => {
             const speaker = m.from === "you" ? "User" : m.from === "system" ? "System" : employeeMap.get(m.from)?.name ?? "Team member";
             return speaker + ": " + m.text;
           });
@@ -671,22 +682,22 @@ export default function App() {
             const submittedAt = new Date().toISOString();
             setJobs((old) => old.map((item) => item.id === job.id ? { ...item, status: "Submitted", result: deliverable, submittedAt, updatedAt: submittedAt } : item));
             setEmployees((old) => old.map((employee) => employee.id === emp.id ? { ...employee, status: "Needs review", task: job.title } : employee));
-            return { emp, answer: "I’ve opened an assignment for myself: " + job.title + "\\n\\nI’ve completed a first deliverable and submitted it for review. You can inspect it in Jobs & approvals.", error: "", jobId: job.id };
+            return { emp, answer: "I’ve opened an assignment for myself: " + job.title + "\\n\\nI’ve completed a first deliverable and submitted it for review. You can inspect it in Jobs & approvals.", error: "", jobId: job.id, respondedAt: submittedAt, respondedTime: nowTime() };
           }
-          if (decision.action === "ignore") return { emp, answer: "[[NO_REPLY]]", error: "" };
-          return { emp, answer: (decision.reply || raw).trim(), error: "", jobId: undefined };
+          if (decision.action === "ignore") return { emp, answer: "[[NO_REPLY]]", error: "", jobId: undefined, respondedAt: undefined, respondedTime: undefined };
+          return { emp, answer: (decision.reply || raw).trim(), error: "", jobId: undefined, respondedAt: new Date().toISOString(), respondedTime: nowTime() };
         } catch (error) {
-          return { emp, answer: "", error: describeError(error, "Unknown OpenRouter error"), jobId: undefined };
+          return { emp, answer: "", error: describeError(error, "Unknown OpenRouter error"), jobId: undefined, respondedAt: undefined, respondedTime: undefined };
         }
       }));
 
       setLiveChatDrafts({});
       const responses: Message[] = replies
         .filter(({ answer }) => answer && answer !== "[[NO_REPLY]]")
-        .map(({ emp, answer, jobId }) => ({ id: crypto.randomUUID(), from: emp.id, text: answer, time: nowTime(), createdAt: new Date().toISOString(), jobId }));
+        .map(({ emp, answer, jobId, respondedAt, respondedTime }) => ({ id: crypto.randomUUID(), from: emp.id, text: answer, time: respondedTime ?? nowTime(), createdAt: respondedAt ?? new Date().toISOString(), jobId }));
 
       if (responses.length) {
-        setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, ...responses] } : c));
+        setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: chronologicalMessages([...c.messages, ...responses]) } : c));
       } else if (activeConversation.kind === "group" && !replies.some(({ error }) => error)) {
         setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: "system", text: "The team reviewed the message; nobody had a useful contribution to add yet.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
       }
@@ -1333,7 +1344,7 @@ export default function App() {
           <div className="chat-heading"><div><div className="breadcrumb">Workspace <ChevronRight size={13} /> Communication</div><h1>Communication</h1><p>Talk to your team and coordinate work in one place.</p></div><button className="primary-button" onClick={() => setShowChatForm(true)}><Plus size={16} /> New conversation</button></div>
           <div className="chat-window panel"><div className="chat-main-head">{activeConversation && <><span className={"chat-avatar " + (activeConversation.kind === "group" ? "team-avatar" : "")}>{activeConversation.kind === "group" ? <Users size={17} /> : initials(activeConversation.name)}</span><div><strong>{activeConversation.name}</strong><small>{activeConversation.kind === "group" ? activeConversation.members.length + " team members" : "Private conversation"}</small></div></>}<button className={"icon-button subtle " + (showChatDetails ? "active" : "")} title="Conversation details and team directory" onClick={() => setShowChatDetails((open) => !open)}><MoreHorizontal size={18} /></button></div>
             {showChatDetails && <aside className="chat-details-panel"><div className="chat-details-title"><div><strong>People in this chat</strong><small>{activeConversation?.members.length ?? 0} employees</small></div><button className="tiny-icon" onClick={() => setShowChatDetails(false)} aria-label="Close people panel">×</button></div>{activeConversation?.members.length ? activeConversation.members.map((memberId) => employeeMap.get(memberId)).filter((e): e is Employee => Boolean(e) && (e!.name + " " + e!.role).toLowerCase().includes(search.toLowerCase())).map((e) => <button className="chat-detail-person" key={e.id} onClick={() => { setProfileEmployeeId(e.id); setShowChatDetails(false); }}><span className="avatar small">{initials(e.name)}</span><span><strong>{e.name}</strong><small>{e.role} · reports to {managerNameFor(e.managerId)}</small></span><ChevronRight size={15} /></button>) : <p className="chat-details-empty">No employees are in this conversation.</p>}</aside>}
-            <div className="message-stream">{activeConversation?.messages.map((m) => <div key={m.id} className={"message-row " + (m.from === "you" ? "mine" : "")}><span className="avatar tiny">{initials(employeeNameFor(m.from))}</span><div className="message-content"><div className="message-meta"><strong>{employeeNameFor(m.from)}</strong><span>{m.time}</span></div><div className="message-bubble"><MarkdownPreview content={parseEmployeeOutput(m.text).reply || m.text} /></div>{m.jobId && <button className="message-job-link" onClick={() => { changePage("Jobs & approvals"); setSelectedJobId(m.jobId ?? null); }}><Inbox size={13} /> View job and deliverable</button>}</div></div>)}
+            <div className="message-stream">{activeConversation && chronologicalMessages(activeConversation.messages).map((m) => <div key={m.id} className={"message-row " + (m.from === "you" ? "mine" : "")}><span className="avatar tiny">{initials(employeeNameFor(m.from))}</span><div className="message-content"><div className="message-meta"><strong>{employeeNameFor(m.from)}</strong><span>{m.time}</span></div><div className="message-bubble"><MarkdownPreview content={parseEmployeeOutput(m.text).reply || m.text} /></div>{m.jobId && <button className="message-job-link" onClick={() => { changePage("Jobs & approvals"); setSelectedJobId(m.jobId ?? null); }}><Inbox size={13} /> View job and deliverable</button>}</div></div>)}
               {Object.entries(liveChatDrafts).filter(([key, draft]) => key.startsWith((activeConversation?.id ?? "") + ":") && draft).map(([key, draft]) => { const employeeId = key.split(":")[1]; return <div className="message-row" key={key}><span className="avatar tiny">{initials(employeeNameFor(employeeId))}</span><div className="message-content"><div className="message-meta"><strong>{employeeNameFor(employeeId)}</strong><span>typing</span></div><div className="message-bubble streaming-bubble"><MarkdownPreview content={draft} /><span className="streaming-cursor" /></div></div></div>; })}
               {busy && !Object.entries(liveChatDrafts).some(([key, draft]) => key.startsWith((activeConversation?.id ?? "") + ":") && Boolean(draft)) && <div className="typing-indicator"><span /><span /><span /> A colleague is deciding whether to contribute…</div>}
               {!activeConversation?.messages.length && <div className="chat-empty"><span className="chat-empty-icon"><MessageCircle size={22} /></span><strong>Start the conversation</strong><p>Send a message. Employees decide whether to reply or open and complete assignments themselves.</p></div>}
