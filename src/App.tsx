@@ -134,7 +134,9 @@ const describeError = (error: unknown, fallback: string) => {
 const requestChatGPT = async (_model: string, messages: Array<{ role: string; content: string }>, onChunk?: (text: string) => void): Promise<string> => {
   const { data: { session }, error: sessionError } = await supabase.auth.getSession();
   if (sessionError || !session?.access_token) throw new Error("Sign in again to use the ChatGPT browser connection.");
-  const response = await fetch(`${supabaseUrl}/functions/v1/chatgpt-playwright`, {
+  const workerUrl = (import.meta.env.VITE_PLAYWRIGHT_SERVICE_URL as string | undefined)?.replace(/\/$/, "");
+  if (!workerUrl) throw new Error("The Playwright worker URL is not configured. Set the PLAYWRIGHT_SERVICE_URL GitHub Actions variable and redeploy AutoBusiness.");
+  const response = await fetch(`${workerUrl}/v1/chat/completions`, {
     method: "POST",
     headers: { "Authorization": "Bearer " + session.access_token, "apikey": supabasePublishableKey, "Content-Type": "application/json" },
     body: JSON.stringify({ messages })
