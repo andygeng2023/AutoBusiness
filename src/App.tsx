@@ -121,7 +121,6 @@ const makeDemoGoals = (): Goal[] => [
   { id: "demo-goal-2", title: "Make onboarding more consistent", description: "Document a simple first-week customer journey.", progress: 30, status: "active" }
 ];
 const fallbackFreeModels = [{ id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B (free)" }, { id: "google/gemma-3-27b-it:free", name: "Gemma 3 27B (free)" }, { id: "deepseek/deepseek-r1-0528:free", name: "DeepSeek R1 (free)" }];
-const openRouterKeyName = "autobusiness_openrouter_api_key";
 const initials = (name: string) => name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 const nowTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const describeError = (error: unknown, fallback: string) => {
@@ -132,11 +131,22 @@ const describeError = (error: unknown, fallback: string) => {
   }
   return fallback;
 };
-const requestOpenRouter = async (model: string, messages: Array<{ role: string; content: string }>, apiKey: string, onChunk?: (text: string) => void): Promise<string> => {
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Authorization": "Bearer " + apiKey.trim(), "Content-Type": "application/json", "HTTP-Referer": window.location.origin, "X-Title": "AutoBusiness" }, body: JSON.stringify({ model, messages, temperature: 0.4, stream: true }) });
+const requestOpenRouter = async (model: string, messages: Array<{ role: string; content: string }>, onChunk?: (text: string) => void): Promise<string> => {
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !session?.access_token) throw new Error("Sign in again to use the server-side OpenRouter connection.");
+  const response = await fetch(`${supabase.supabaseUrl}/functions/v1/openrouter-proxy`, {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer " + session.access_token,
+      "apikey": supabase.supabaseKey,
+      "Content-Type": "application/json",
+      "X-Title": "AutoBusiness"
+    },
+    body: JSON.stringify({ model, messages, temperature: 0.4, stream: true })
+  });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload?.error?.message || `OpenRouter request failed (${response.status})`);
+    throw new Error(payload?.error?.message || payload?.message || `OpenRouter proxy failed (${response.status})`);
   }
   if (!response.body) throw new Error("Streaming is unavailable for this response.");
   const reader = response.body.getReader();
@@ -144,7 +154,7 @@ const requestOpenRouter = async (model: string, messages: Array<{ role: string; 
   let buffer = "";
   let result = "";
   const consumeFrame = (frame: string) => {
-    const data = frame.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
+    const data = frame.split("\\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\\n");
     if (!data || data === "[DONE]") return;
     try {
       const payload = JSON.parse(data);
@@ -156,12 +166,12 @@ const requestOpenRouter = async (model: string, messages: Array<{ role: string; 
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true }).replaceAll("\r\n", "\n");
-    const frames = buffer.split("\n\n");
+    buffer += decoder.decode(value, { stream: true }).replaceAll("\\r\\n", "\\n");
+    const frames = buffer.split("\\n\\n");
     buffer = frames.pop() ?? "";
     frames.forEach(consumeFrame);
   }
-  buffer += decoder.decode().replaceAll("\r\n", "\n");
+  buffer += decoder.decode().replaceAll("\\r\\n", "\\n");
   if (buffer.trim()) consumeFrame(buffer);
   return result;
 };
@@ -306,7 +316,6 @@ export default function App() {
   const [liveChatDrafts, setLiveChatDrafts] = useState<Record<string, string>>({});
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [activeSettings, setActiveSettings] = useState("General");
-  const [openRouterKey, setOpenRouterKey] = useState(() => window.localStorage.getItem(openRouterKeyName) ?? "");
   const [freeModels, setFreeModels] = useState(fallbackFreeModels);
   const [modelsLoading, setModelsLoading] = useState(false);
 
@@ -599,7 +608,6 @@ export default function App() {
     }
 
     if (!settings.connectors.includes("OpenRouter")) { notify("Message saved. Enable OpenRouter in Settings to receive AI replies."); return; }
-    if (!openRouterKey.trim()) { notify("Add your OpenRouter API key in Settings → Connectors first."); setPage("Settings"); setActiveSettings("Connectors"); return; }
 
     setBusy(true);
     try {
@@ -655,7 +663,7 @@ export default function App() {
           const draftKey = activeConversation.id + ":" + emp.id;
           let rawStream = "";
           setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
-          const raw = await requestOpenRouter(model, prompt, openRouterKey, (chunk) => {
+          const raw = await requestOpenRouter(model, prompt, (chunk) => {
             rawStream += chunk;
             const visible = visibleEmployeeText(rawStream);
             if (visible) setLiveChatDrafts((old) => ({ ...old, [draftKey]: visible }));
@@ -671,7 +679,7 @@ export default function App() {
               { role: "user", content: workspaceMemoryFor(emp) + "\\n\\nASSIGNMENT: " + job.title + "\\nBRIEF: " + job.description + "\\n\nCURRENT CHAT CONTEXT:\\n" + dialogue + "\\n\\nUSER'S LATEST REQUEST: " + text + "\\n\\nProduce the deliverable now, not a plan." }
             ];
             let deliverableStream = "";
-            const rawDeliverable = await requestOpenRouter(model, workPrompt, openRouterKey, (chunk) => {
+            const rawDeliverable = await requestOpenRouter(model, workPrompt, (chunk) => {
               deliverableStream += chunk;
               const visible = visibleEmployeeText(deliverableStream);
               setJobs((old) => old.map((item) => item.id === job.id ? { ...item, result: visible } : item));
@@ -778,7 +786,6 @@ export default function App() {
       return;
     }
     if (!settings.connectors.includes("OpenRouter")) { if (!background) notify("Enable OpenRouter in Settings before running AI jobs"); return; }
-    if (!openRouterKey.trim()) { if (!background) { notify("Add your OpenRouter API key in Settings → Connectors first."); setPage("Settings"); setActiveSettings("Connectors"); } return; }
     if (!background && autoRunJobLockRef.current) { notify("A background agent is already working on a job."); return; }
     if (!background && busy) return;
     const job = jobs.find((item) => item.id === jobId);
@@ -799,7 +806,7 @@ export default function App() {
         let streamed = "";
         if (draftKey) setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
         try {
-          const rawOutput = await requestOpenRouter(modelFor(employee), messages, openRouterKey, (chunk) => {
+          const rawOutput = await requestOpenRouter(modelFor(employee), messages, (chunk) => {
             streamed += chunk;
             const visible = visibleEmployeeText(streamed);
             if (draftKey) setLiveChatDrafts((old) => ({ ...old, [draftKey]: visible }));
@@ -889,7 +896,7 @@ export default function App() {
     } finally { if (!background) setBusy(false); }
   };
   useEffect(() => {
-    if (demoMode || !user || !company || loadedCompanyId !== company.id || !openRouterKey.trim() || !settings.connectors.includes("OpenRouter")) return;
+    if (demoMode || !user || !company || loadedCompanyId !== company.id || !settings.connectors.includes("OpenRouter")) return;
     if (busy || autoRunJobLockRef.current || teamPulseLockRef.current) return;
 
     const nextJob = settings.autoRun ? jobs.filter((job) => job.status === "In progress").sort((a, b) =>
@@ -1023,7 +1030,7 @@ export default function App() {
           setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
           let response = "";
           try {
-            response = await requestOpenRouter(model, prompt, openRouterKey, (chunk) => {
+            response = await requestOpenRouter(model, prompt, (chunk) => {
               streamed += chunk;
               const visible = streamed.trimStart();
               if (!"[[NO_REPLY]]".startsWith(visible)) {
@@ -1070,7 +1077,7 @@ export default function App() {
       }
     };
     void processEvent();
-  }, [demoMode, user?.id, company?.id, loadedCompanyId, settings.autoRun, settings.connectors, openRouterKey, jobs, employees, conversations, freeModels, busy]);
+  }, [demoMode, user?.id, company?.id, loadedCompanyId, settings.autoRun, settings.connectors, jobs, employees, conversations, freeModels, busy]);
 
   const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id, updatedAt: new Date().toISOString() } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
   const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress", updatedAt: new Date().toISOString() } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
@@ -1361,12 +1368,9 @@ export default function App() {
             <h2>AI provider & connectors</h2>
             <p className="settings-intro">Only models with zero prompt and completion prices are offered.</p>
             {demoMode ? <div className="demo-connector-notice"><Sparkles size={16} /><div><strong>Provider connections are simulated in demo mode</strong><p>No API key is read, saved, or used for demo replies and sample deliverables. Sign in to configure an AI provider for real work.</p></div></div> : <><div className="openrouter-key-card">
-              <label className="field-label">OpenRouter API key
-                <input type="password" autoComplete="off" value={openRouterKey} onChange={(e) => { setOpenRouterKey(e.target.value); window.localStorage.setItem(openRouterKeyName, e.target.value); }} placeholder="Paste an OpenRouter API key" />
-              </label>
-              <p className="small-disclaimer">This static app sends requests directly from the browser. A key stored here can be inspected on this device; a server-side proxy is safer for shared/public use.</p>
+              <p className="small-disclaimer">OpenRouter credentials are held in Supabase Edge Function secrets and never stored in this browser. The server rotates through configured keys after rate-limit responses and streams replies directly to the app.</p>
               <div className="settings-info-row">
-                <div><strong>OpenRouter</strong><small>{openRouterKey.trim() ? "API key saved in this browser." : "Add your key to enable AI replies and employee deliverables."}</small></div>
+                <div><strong>OpenRouter server connection</strong><small>Keys are managed securely in the Supabase project, not on individual devices.</small></div>
                 <button className={"connector-action " + (settings.connectors.includes("OpenRouter") ? "enabled" : "")} onClick={() => setSettings((old) => ({ ...old, connectors: old.connectors.includes("OpenRouter") ? old.connectors.filter((x) => x !== "OpenRouter") : [...old.connectors, "OpenRouter"] }))}>{settings.connectors.includes("OpenRouter") ? "Enabled" : "Enable"}</button>
               </div>
               <div className="settings-info-row">
@@ -1375,7 +1379,7 @@ export default function App() {
               </div>
             </div></>}
             <div className="connector-row"><span className="connector-icon"><Zap size={17} /></span><div><strong>Supabase</strong><small>{demoMode ? "Cloud storage is bypassed in this session." : "Database and authentication for this workspace."}</small></div>{demoMode ? <span className="setting-pill">Demo only</span> : <button className="connector-action enabled" disabled><Check size={13} /> Connected</button>}</div>
-          </>}{activeSettings === "Automation & limits" && <><h2>Automation & usage limits</h2><p className="settings-intro">Control autonomous work, the approval gate and usage limits. Background agents run while this workspace is open and connected.</p><div className="setting-toggle-row"><div><strong>Always-on team collaboration</strong><small>{demoMode ? "Demo mode does not make external AI calls." : !settings.autoRun ? "Agents are paused. Turn this on to run eligible jobs and coordinate around active work." : !openRouterKey.trim() ? "Enabled, but waiting for an OpenRouter API key in Settings → Connectors." : !settings.connectors.includes("OpenRouter") ? "Enabled, but OpenRouter is disabled in Connectors." : "Agents are monitoring in-progress jobs and periodically coordinating in the Team collaboration chat."}</small></div><button className={"toggle " + (settings.autoRun ? "on" : "")} role="switch" aria-checked={settings.autoRun} aria-label="Always-on team collaboration" onClick={() => setSettings((old) => ({ ...old, autoRun: !old.autoRun }))}><span /></button></div><div className="setting-toggle-row"><div><strong>Require approval before jobs start</strong><small>{settings.approvalRequired ? "New assignments wait in the queue until you start them. Running jobs can still receive background assistance." : "New assignments start immediately and are picked up by the background team when a provider is configured."}</small></div><button className={"toggle " + (settings.approvalRequired ? "on" : "")} role="switch" aria-checked={settings.approvalRequired} aria-label="Require approval before jobs start" onClick={() => setSettings((old) => ({ ...old, approvalRequired: !old.approvalRequired }))}><span /></button></div><label className="field-label">Daily job creation limit<input type="number" min="1" max="10000" value={settings.dailyLimit} onChange={(e) => setSettings({ ...settings, dailyLimit: Math.max(1, Number(e.target.value)) })} /></label><label className="field-label">Monthly job creation limit<input type="number" min="1" max="100000" value={settings.monthlyLimit} onChange={(e) => setSettings({ ...settings, monthlyLimit: Math.max(1, Number(e.target.value)) })} /></label><div className="usage-summary"><div className="usage-summary-top"><span>Deliverables with results</span><strong>{jobs.filter((j) => Boolean(j.result?.trim())).length} / {jobs.length}</strong></div><div className="usage-track"><span style={{ width: (jobs.length ? jobs.filter((j) => Boolean(j.result?.trim())).length / jobs.length * 100 : 0) + "%" }} /></div></div><p className="small-disclaimer">Provider token usage and billing are not exposed by the current browser AI integration. These figures count saved deliverables, not billable tokens.</p></>}
+          </>}{activeSettings === "Automation & limits" && <><h2>Automation & usage limits</h2><p className="settings-intro">Control autonomous work, the approval gate and usage limits. Background agents run while this workspace is open and connected.</p><div className="setting-toggle-row"><div><strong>Always-on team collaboration</strong><small>{demoMode ? "Demo mode does not make external AI calls." : !settings.autoRun ? "Agents are paused. Turn this on to run eligible jobs and coordinate around active work." : !settings.connectors.includes("OpenRouter") ? "Enabled, but OpenRouter is disabled in Connectors." : "Agents are monitoring in-progress jobs and periodically coordinating in the Team collaboration chat."}</small></div><button className={"toggle " + (settings.autoRun ? "on" : "")} role="switch" aria-checked={settings.autoRun} aria-label="Always-on team collaboration" onClick={() => setSettings((old) => ({ ...old, autoRun: !old.autoRun }))}><span /></button></div><div className="setting-toggle-row"><div><strong>Require approval before jobs start</strong><small>{settings.approvalRequired ? "New assignments wait in the queue until you start them. Running jobs can still receive background assistance." : "New assignments start immediately and are picked up by the background team when a provider is configured."}</small></div><button className={"toggle " + (settings.approvalRequired ? "on" : "")} role="switch" aria-checked={settings.approvalRequired} aria-label="Require approval before jobs start" onClick={() => setSettings((old) => ({ ...old, approvalRequired: !old.approvalRequired }))}><span /></button></div><label className="field-label">Daily job creation limit<input type="number" min="1" max="10000" value={settings.dailyLimit} onChange={(e) => setSettings({ ...settings, dailyLimit: Math.max(1, Number(e.target.value)) })} /></label><label className="field-label">Monthly job creation limit<input type="number" min="1" max="100000" value={settings.monthlyLimit} onChange={(e) => setSettings({ ...settings, monthlyLimit: Math.max(1, Number(e.target.value)) })} /></label><div className="usage-summary"><div className="usage-summary-top"><span>Deliverables with results</span><strong>{jobs.filter((j) => Boolean(j.result?.trim())).length} / {jobs.length}</strong></div><div className="usage-track"><span style={{ width: (jobs.length ? jobs.filter((j) => Boolean(j.result?.trim())).length / jobs.length * 100 : 0) + "%" }} /></div></div><p className="small-disclaimer">Provider token usage and billing are not exposed by the current browser AI integration. These figures count saved deliverables, not billable tokens.</p></>}
         </section></div></div>}
       </main>
     </div>
