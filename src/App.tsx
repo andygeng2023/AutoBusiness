@@ -779,15 +779,15 @@ export default function App() {
       }
       if (reviewer) {
         try {
-          reviewFeedback = (await requestOpenRouter(modelFor(reviewer), [
+          reviewFeedback = await streamEmployeeOutput(reviewer, [
             { role: "system", content: "You are " + reviewer.name + ", " + reviewer.role + " and " + (manager?.id === reviewer.id ? "the manager" : "a collaborating colleague") + " of " + emp.name + ". Review the draft against the brief. Give concise, specific feedback: gaps, factual cautions, missing acceptance criteria and concrete improvements. Do not rewrite the entire deliverable and do not invent facts." },
-            { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nDRAFT FROM " + emp.name + ":\n" + draft + "\n\nProvide a useful peer review in under 250 words." }
-          ], openRouterKey)).trim();
+            { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nDRAFT FROM " + emp.name + ":\n" + output + "\n\nProvide a useful peer review in under 250 words." }
+          ]);
           if (reviewFeedback) {
-            const revised = (await requestOpenRouter(modelFor(emp), [
+            const revised = await streamEmployeeOutput(emp, [
               { role: "system", content: "You are " + emp.name + ", " + emp.role + ". Refine your deliverable using the peer review. Keep strong original material, address valid issues, and do not blindly accept unsupported feedback. Produce only the revised final deliverable." },
-              { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nYOUR FIRST DRAFT:\n" + draft + "\n\nREVIEW FROM " + reviewer.name + ":\n" + reviewFeedback + "\n\nPREVIOUS USER FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None") }
-            ], openRouterKey)).trim();
+              { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nYOUR FIRST DRAFT:\n" + output + "\n\nREVIEW FROM " + reviewer.name + ":\n" + reviewFeedback + "\n\nPREVIOUS USER FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None") }
+            ], true);
             if (revised) output = revised;
           }
         } catch (reviewError) {
