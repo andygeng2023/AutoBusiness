@@ -420,3 +420,4 @@
 .message-bubble .markdown-preview a:hover{opacity:.82}
 
 .streaming-bubble{position:relative}.streaming-cursor{display:inline-block;width:2px;height:1em;margin-left:3px;vertical-align:-.12em;background:currentColor;animation:stream-caret 1s steps(2,start) infinite}@keyframes stream-caret{to{visibility:hidden}}
+/* AutoBusiness design stylesheet refresh: publish a new hashed asset to avoid stale cached CSS. */
