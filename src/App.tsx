@@ -59,7 +59,7 @@ function MarkdownPreview({ content }: { content: string }) {
 
 type Employee = { id: string; name: string; role: string; deptId: string; managerId?: string; tone: string; model: string; instructions: string; status: "Available" | "Working" | "Needs review" | "Paused"; task?: string };
 type Dept = { id: string; name: string; parentId?: string };
-type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string; reviewedBy?: string };
+type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; updatedAt?: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string; reviewedBy?: string };
 type Message = { id: string; from: string; text: string; time: string; jobId?: string; createdAt?: string; senderUserId?: string };
 type Conversation = { id: string; name: string; kind: "private" | "group"; members: string[]; messages: Message[]; createdBy?: string };
 type Company = { id: string; name: string; industry: string; initials: string; color: string; description: string };
@@ -480,7 +480,7 @@ export default function App() {
     };
     if (jobs.filter((job) => countInPeriod(job, "day")).length >= settings.dailyLimit) { notify("Daily job creation limit reached. Increase the limit in Settings to assign more work."); return; }
     if (jobs.filter((job) => countInPeriod(job, "month")).length >= settings.monthlyLimit) { notify("Monthly job creation limit reached. Increase the limit in Settings to assign more work."); return; }
-    const job: Job = { id: crypto.randomUUID(), title: jobTitle.trim(), description: jobDescription.trim(), employeeId: jobEmployee, status: settings.approvalRequired ? "Queued" : "In progress", priority: jobPriority, created: new Date().toISOString(), createdBy: user.id };
+    const job: Job = { id: crypto.randomUUID(), title: jobTitle.trim(), description: jobDescription.trim(), employeeId: jobEmployee, status: settings.approvalRequired ? "Queued" : "In progress", priority: jobPriority, created: new Date().toISOString(), updatedAt: new Date().toISOString(), createdBy: user.id };
     setJobs((old) => [job, ...old]);
     setEmployees((old) => old.map((e) => e.id === jobEmployee ? { ...e, status: job.status === "Queued" ? "Available" : "Working", task: job.title } : e));
     setJobTitle(""); setJobDescription(""); setJobPriority("Normal"); setShowJobForm(false); notify(settings.approvalRequired ? "Job queued for approval" : "Job assigned");
@@ -602,7 +602,7 @@ export default function App() {
           };
           if (decision.action === "start_job") {
             const title = (decision.title || text).trim().slice(0, 240);
-            const job: Job = { id: crypto.randomUUID(), title: title || "Employee task", description: (decision.description || text).trim(), employeeId: emp.id, status: "In progress", priority: "Normal", created: new Date().toISOString(), createdBy: user?.id };
+            const job: Job = { id: crypto.randomUUID(), title: title || "Employee task", description: (decision.description || text).trim(), employeeId: emp.id, status: "In progress", priority: "Normal", created: new Date().toISOString(), updatedAt: new Date().toISOString(), createdBy: user?.id };
             setJobs((old) => [job, ...old]);
             setEmployees((old) => old.map((employee) => employee.id === emp.id ? { ...employee, status: "Working", task: job.title } : employee));
             const workPrompt = [
@@ -799,7 +799,7 @@ export default function App() {
         }
       }
       const submittedAt = new Date().toISOString();
-      setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Submitted", result: output, submittedAt } : item));
+      setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "Submitted", result: output, submittedAt, updatedAt: submittedAt } : item));
       setEmployees((old) => old.map((employee) => employee.id === emp.id ? { ...employee, status: "Needs review", task: job.title } : employee));
       if (reviewFeedback && reviewer) {
         addWorkNote(reviewer.id, "Reviewing the shared document against the brief. My checks are completeness, unsupported claims, and whether the acceptance criteria are met.\n\nReview notes for “" + job.title + "”:\n\n" + reviewFeedback.slice(0, 1800));
@@ -845,8 +845,8 @@ export default function App() {
       })));
     const jobEvents = jobs.filter((job) => ["Queued", "In progress", "Submitted", "Rejected", "Approved"].includes(job.status))
       .map((job) => ({
-        key: "job:" + job.id + ":" + job.status + ":" + (job.submittedAt || job.created),
-        at: Date.parse(job.submittedAt || job.created) || 0,
+        key: "job:" + job.id + ":" + job.status + ":" + (job.updatedAt || job.submittedAt || job.created),
+        at: Date.parse(job.updatedAt || job.submittedAt || job.created) || 0,
         kind: "job" as const,
         job
       }));
@@ -1000,9 +1000,9 @@ export default function App() {
     void processEvent();
   }, [demoMode, user?.id, company?.id, loadedCompanyId, settings.autoRun, settings.connectors, openRouterKey, jobs, employees, conversations, freeModels, busy]);
 
-  const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
-  const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress" } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
-  const requestRevision = (jobId: string) => { if (!reviewNote.trim()) { notify("Add a note explaining what needs to change"); return; } setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Rejected", reviewNote: reviewNote.trim() } : j)); notify("Revision requested — feedback saved to the job"); };
+  const approveJob = (jobId: string) => { setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Approved", reviewNote: "", reviewedBy: user?.id, updatedAt: new Date().toISOString() } : j)); setEmployees((old) => old.map((e) => e.id === jobs.find((j) => j.id === jobId)?.employeeId ? { ...e, status: "Available", task: undefined } : e)); notify("Work approved"); };
+  const startJob = (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (!job) return; setJobs((old) => old.map((item) => item.id === jobId ? { ...item, status: "In progress", updatedAt: new Date().toISOString() } : item)); setEmployees((old) => old.map((employee) => employee.id === job.employeeId ? { ...employee, status: "Working", task: job.title } : employee)); notify("Job started"); };
+  const requestRevision = (jobId: string) => { if (!reviewNote.trim()) { notify("Add a note explaining what needs to change"); return; } setJobs((old) => old.map((j) => j.id === jobId ? { ...j, status: "Rejected", reviewNote: reviewNote.trim(), updatedAt: new Date().toISOString() } : j)); notify("Revision requested — feedback saved to the job"); };
   const deleteJob = async (jobId: string) => { if (company && !demoMode) { const { error } = await supabase.from("jobs").delete().eq("id", jobId).eq("company_id", company.id); if (error) { notify("Could not delete job: " + error.message); return; } } setJobs((old) => old.filter((j) => j.id !== jobId)); setSelectedJobId((current) => current === jobId ? null : current); notify(demoMode ? "Demo job removed for this session" : "Job deleted"); };
   const createCompany = async (event: FormEvent) => {
     event.preventDefault();
