@@ -23,22 +23,71 @@ const jsonError = (message: string, status: number, headers: HeadersInit = {}) =
     headers: { "Content-Type": "application/json", ...headers },
   });
 
-function configuredKeys(): string[] {
-  const raw = Deno.env.get("OPENROUTER_API_KEYS") ?? Deno.env.get("OPENROUTER_API_KEY") ?? "";
-  if (!raw.trim()) return [];
+type KeyPoolSource = "OPENROUTER_API_KEYS" | "OPENROUTER_API_KEY" | "none";
+type KeyPool = { keys: string[]; rawEntries: string[]; source: KeyPoolSource };
+
+function normalizeApiKey(value: string): string {
+  let key = value.replace(/^\uFEFF/, "").trim();
+  // Accept common dashboard copy/paste formats without changing the token itself.
+  key = key.replace(/^[-*]\s*/, "").trim();
+  key = key.replace(/^["'`]+|["'`]+$/g, "").trim();
+  key = key.replace(/^authorization\s*:\s*/i, "");
+  key = key.replace(/^bearer\s*:?\s*/i, "");
+  // API tokens never contain whitespace; this also removes wrapped lines and CRLF.
+  return key.replace(/[\s\u200B-\u200D\uFEFF]+/g, "");
+}
+
+function configuredKeys(): KeyPool {
+  const plural = Deno.env.get("OPENROUTER_API_KEYS") ?? "";
+  const singular = Deno.env.get("OPENROUTER_API_KEY") ?? "";
+  const raw = plural.trim() ? plural : singular;
+  const source: KeyPoolSource = plural.trim()
+    ? "OPENROUTER_API_KEYS"
+    : singular.trim()
+    ? "OPENROUTER_API_KEY"
+    : "none";
+  if (!raw.trim()) return { keys: [], rawEntries: [], source };
+
+  let entries: unknown[] | null = null;
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (Array.isArray(parsed)) return [...new Set(parsed.filter((key): key is string => typeof key === "string").map((key) => key.trim()).filter(Boolean))];
+    if (Array.isArray(parsed)) entries = parsed;
+    else if (typeof parsed === "string") entries = parsed.split(/[,;\r\n]+/);
+    else if (parsed && typeof parsed === "object" && Array.isArray((parsed as { keys?: unknown }).keys)) {
+      entries = (parsed as { keys: unknown[] }).keys;
+    }
   } catch {
-    // A comma-separated secret is also supported for easier dashboard setup.
+    // Plain text pools may be comma-, semicolon-, or newline-separated.
   }
-  return [...new Set(raw.split(",").map((key) => key.trim()).filter(Boolean))];
+  if (!entries) entries = raw.split(/[,;\r\n]+/);
+
+  const rawEntries = entries.filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const keys = [...new Set(rawEntries.map(normalizeApiKey).filter(Boolean))];
+  return { keys, rawEntries, source };
 }
 
 function isSafeApiKey(key: string): boolean {
-  // HTTP header values must be ASCII here. Reject whitespace, control characters,
-  // and Unicode rather than allowing one malformed secret to break every request.
+  // Header values must be printable ASCII. Normalisation above removes copy/paste
+  // wrappers and whitespace; any remaining non-ASCII/control characters are invalid.
   return /^[\x21-\x7E]+$/.test(key);
+}
+
+function keyPoolDiagnostics(entries: string[]) {
+  return entries.map((entry, index) => {
+    const token = normalizeApiKey(entry);
+    return {
+      slot: index + 1,
+      originalLength: entry.length,
+      normalizedLength: token.length,
+      containedWhitespace: /[\s\u200B-\u200D\uFEFF]/.test(entry),
+      containedNonAscii: /[^\x21-\x7E]/.test(entry),
+      hadOuterQuotes: /^["'`].*["'`]$/.test(entry),
+      hadBearerPrefix: /^(?:authorization\s*:\s*)?bearer\s+/i.test(entry),
+      hasOpenRouterPrefix: /^sk-or-/i.test(token),
+    };
+  });
 }
 
 function orderedKeys(keys: string[]): string[] {
@@ -79,15 +128,27 @@ Deno.serve(async (req: Request) => {
     return jsonError("Each message must have a supported role and text content under 50,000 characters.", 400, corsHeaders(origin));
   }
 
-  const configured = configuredKeys();
-  const keys = configured.filter(isSafeApiKey);
-  if (!configured.length) return jsonError("The server-side OpenRouter key pool is not configured. Add OPENROUTER_API_KEYS to Supabase Edge Function secrets.", 503, corsHeaders(origin));
-  if (!keys.length) {
-    console.error("OpenRouter key pool contains no valid ASCII API keys", { configuredKeyCount: configured.length });
-    return jsonError("The OpenRouter key pool contains invalid key formatting. Re-enter the keys as plain ASCII API keys in Supabase Edge Function secrets.", 503, corsHeaders(origin));
+  const pool = configuredKeys();
+  const normalized = pool.keys;
+  const keys = normalized.filter(isSafeApiKey);
+  if (!pool.rawEntries.length) {
+    return jsonError("The server-side OpenRouter key pool is not configured. Add OPENROUTER_API_KEYS to Supabase Edge Function secrets.", 503, corsHeaders(origin));
   }
-  if (keys.length !== configured.length) {
-    console.error("Ignored malformed OpenRouter keys", { configuredKeyCount: configured.length, usableKeyCount: keys.length });
+  if (!keys.length) {
+    console.error("OpenRouter key pool rejected; safe formatting diagnostics only", {
+      source: pool.source,
+      configuredKeyCount: pool.rawEntries.length,
+      diagnostics: keyPoolDiagnostics(pool.rawEntries),
+    });
+    return jsonError("The OpenRouter key pool contains no usable API keys. Use raw OpenRouter keys in a JSON array, or one key per line/comma; optional quotes and a leading Bearer prefix are accepted.", 503, corsHeaders(origin));
+  }
+  if (keys.length !== normalized.length) {
+    console.error("Ignored malformed OpenRouter key entries", {
+      source: pool.source,
+      configuredKeyCount: normalized.length,
+      usableKeyCount: keys.length,
+      diagnostics: keyPoolDiagnostics(pool.rawEntries),
+    });
   }
 
   const candidates = orderedKeys(keys);
