@@ -7,6 +7,6 @@
     "login": "node login.mjs"
   },
   "dependencies": {
-    "playwright": "^1.56.1"
+    "playwright": "1.56.1"
   }
 }
