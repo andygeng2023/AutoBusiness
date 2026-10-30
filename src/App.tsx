@@ -599,7 +599,9 @@ export default function App() {
               { role: "system", content: "You are " + emp.name + ", " + emp.role + ". Complete the assignment and produce the actual deliverable. Follow your instructions: " + (emp.instructions || "Be accurate and useful.") + ". Do not claim external actions or access you do not have. If blocked, clearly report the blocker and what is needed." },
               { role: "user", content: workspaceMemoryFor(emp) + "\\n\\nASSIGNMENT: " + job.title + "\\nBRIEF: " + job.description + "\\n\nCURRENT CHAT CONTEXT:\\n" + dialogue + "\\n\\nUSER'S LATEST REQUEST: " + text + "\\n\\nProduce the deliverable now, not a plan." }
             ];
-            const deliverable = (await requestOpenRouter(model, workPrompt, openRouterKey)).trim();
+            const deliverable = (await requestOpenRouter(model, workPrompt, openRouterKey, (chunk) => {
+              setJobs((old) => old.map((item) => item.id === job.id ? { ...item, result: (item.result || "") + chunk } : item));
+            })).trim();
             if (!deliverable) throw new Error("The assignment was opened, but the AI returned an empty deliverable.");
             setJobs((old) => old.map((item) => item.id === job.id ? { ...item, status: "Submitted", result: deliverable, submittedAt: new Date().toISOString() } : item));
             setEmployees((old) => old.map((employee) => employee.id === emp.id ? { ...employee, status: "Needs review", task: job.title } : employee));
@@ -639,6 +641,7 @@ export default function App() {
           : "OpenRouter request failed: " + reason;
       setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: "system", text: detail + " Your original message is saved.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
     } finally {
+      setLiveChatDrafts({});
       setBusy(false);
     }
   };
@@ -803,15 +806,16 @@ export default function App() {
       }
       const activeJobs = jobs.filter((job) => ["Queued", "In progress", "Submitted", "Rejected"].includes(job.status));
       const activeGoals = goals.filter((goal) => goal.status === "active" || goal.status === "planned");
-      if (Date.now() - lastTeamPulseRef.current < 15 * 1000) return;
+      if (Date.now() - lastTeamPulseRef.current < 5 * 60 * 1000) return;
       const activeEmployees = employees.filter((employee) => employee.status !== "Paused");
       if (activeEmployees.length < 2) return;
       teamPulseLockRef.current = true;
-      lastTeamPulseRef.current = Date.now();
       try {
         const room = await ensureCollaborationRoom();
         if (!room) return;
-        const tickIndex = Math.floor(Date.now() / (15 * 1000)) % activeEmployees.length;
+        if (!room.messages.some((message) => message.from === "you" && Date.parse(message.createdAt) > lastTeamPulseRef.current)) return;
+        lastTeamPulseRef.current = Date.now();
+        const tickIndex = Math.floor(Date.now() / (5 * 60 * 1000)) % activeEmployees.length;
         const actor = activeEmployees[tickIndex];
         const peer = (actor.managerId ? employeeMap.get(actor.managerId) : undefined)
           ?? activeEmployees.find((employee) => employee.managerId === actor.id)
@@ -841,7 +845,7 @@ export default function App() {
         teamPulseLockRef.current = false;
       }
     };
-    const timer = window.setInterval(() => { void tick(); }, 15000);
+    const timer = window.setInterval(() => { void tick(); }, 60 * 1000);
     void tick();
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [demoMode, user?.id, company?.id, loadedCompanyId, settings.autoRun, settings.connectors, openRouterKey, jobs, employees, conversations, goals, freeModels, busy]);
