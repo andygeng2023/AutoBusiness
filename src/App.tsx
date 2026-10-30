@@ -484,7 +484,7 @@ export default function App() {
       setSettings(dbSettings ? {
         approvalRequired: dbSettings.approval_required, autoRun: dbSettings.auto_run,
         dailyLimit: dbSettings.daily_usage_limit, monthlyLimit: dbSettings.monthly_usage_limit,
-        connectors: Array.from(new Set([...(dbSettings.enabled_connectors ?? ["chatgpt_playwright"]).map((name: string) => (({ chatgpt_playwright: "ChatGPT (Playwright)", supabase: "Supabase" } as Record<string, string>)[name] ?? name)), "Supabase"]))
+        connectors: Array.from(new Set([...(dbSettings.enabled_connectors ?? ["chatgpt_playwright"]).map((name: string) => (({ openrouter: "ChatGPT (Playwright)", chatgpt_playwright: "ChatGPT (Playwright)", supabase: "Supabase" } as Record<string, string>)[name] ?? name)), "Supabase"]))
       } : defaultSettings);
       setGoals((goalRes.data ?? []).map((row: any) => ({ id: row.id, title: row.title, description: row.description, progress: Number(row.progress), dueDate: row.due_date ?? undefined, status: row.status, createdBy: row.created_by })));
       setMemberRole(roleRes.data?.role ?? "member");
