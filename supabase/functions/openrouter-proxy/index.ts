@@ -104,15 +104,15 @@ Deno.serve(async (req: Request) => {
   for (const key of candidates) {
     let upstream: Response;
     try {
+      const upstreamHeaders = new Headers();
+      upstreamHeaders.set("Authorization", "Bearer " + key);
+      upstreamHeaders.set("Content-Type", "application/json");
+      upstreamHeaders.set("HTTP-Referer", origin);
+      upstreamHeaders.set("X-Title", "AutoBusiness");
       upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         signal: AbortSignal.timeout(25000),
-        headers: {
-          "Authorization": "Bearer " + key,
-          "Content-Type": "application/json",
-          "HTTP-Referer": origin,
-          "X-Title": "AutoBusiness",
-        },
+        headers: upstreamHeaders,
         body: JSON.stringify({
           model: payload.model,
           messages,
