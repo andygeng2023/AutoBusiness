@@ -44,14 +44,14 @@ function parseKeyEntries(raw: string): string[] {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (Array.isArray(parsed)) entries = parsed;
-    else if (typeof parsed === "string") entries = parsed.split(/[,;\\r\\n]+/);
+    else if (typeof parsed === "string") entries = parsed.split(/[,;\r\n]+/);
     else if (parsed && typeof parsed === "object" && Array.isArray((parsed as { keys?: unknown }).keys)) {
       entries = (parsed as { keys: unknown[] }).keys;
     }
   } catch {
     // Plain text pools may be comma-, semicolon-, or newline-separated.
   }
-  if (!entries) entries = raw.split(/[,;\\r\\n]+/);
+  if (!entries) entries = raw.split(/[,;\r\n]+/);
 
   return entries
     .filter((entry): entry is string => typeof entry === "string")
