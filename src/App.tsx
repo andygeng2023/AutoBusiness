@@ -492,6 +492,8 @@ export default function App() {
     const text = message.trim();
     setMessage("");
     const sent: Message = { id: crypto.randomUUID(), from: "you", text, time: nowTime(), createdAt: new Date().toISOString() };
+    lastTeamPulseRef.current = "message:" + sent.id;
+    teamChainRef.current = 0;
     setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, sent] } : c));
 
     if (demoMode) {
@@ -551,9 +553,9 @@ export default function App() {
           "\\n\\nUse this as persistent working context. Remember decisions, preferences, commitments, previous results, and feedback; do not claim to remember anything outside this supplied history.";
       };
       const groupMembers = activeConversation.members.map((id) => employeeMap.get(id)).filter((emp): emp is Employee => Boolean(emp) && emp?.status !== "Paused");
-      // Every active member is invited to consider the message; each model independently chooses whether to contribute.
+      // Start with one colleague; each reply becomes an event for the next colleague to consider.
       const targets = activeConversation.kind === "group"
-        ? groupMembers
+        ? groupMembers.slice(0, 1)
         : activeConversation.members.length === 1
           ? [employeeMap.get(activeConversation.members[0])].filter((emp): emp is Employee => Boolean(emp))
           : [];
