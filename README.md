@@ -28,7 +28,7 @@ Never put a Supabase service-role or secret key in frontend code or Vite environ
 
 ## Authentication setup
 
-The app uses Supabase Auth email/password sign-in and account creation. If email confirmation is enabled, configure the Supabase Auth URL allow-list to include the local development URL and the deployed GitHub Pages URL (`https://andygeng2023.github.io/AutoBusiness/`). Account confirmation links are directed back to the app base path.
+The app uses Supabase Auth email/password sign-in and account creation. If email confirmation is enabled, configure the Supabase Auth URL allow-list to include the local development URL and the deployed GitHub Pages URL (`https://andygeng2023.github.io/WIP-AutoBusiness/`). Account confirmation links are directed back to the app base path.
 
 ## Data and security
 
@@ -45,50 +45,67 @@ The connector and automation settings are preferences, not integrations with ext
 
 ## ChatGPT browser automation (Playwright)
 
-Live AI requests are routed through the authenticated `chatgpt-playwright` Supabase Edge Function to a separately hosted Node.js Playwright worker. The worker uses a manually authenticated ChatGPT browser session; no OpenRouter API key or OpenRouter model catalogue is used. Employee prompts, chat history and assignment context are passed to the worker and the response is returned to the existing employee workflows using an OpenAI-compatible streaming response.
+AutoBusiness calls the Playwright worker directly over HTTPS. The worker runs on the owner's always-on computer and is published to the internet through the free Tailscale Funnel service. Supabase remains responsible for sign-in and workspace data; it is no longer in the AI request path.
 
-### 1. Create the ChatGPT browser session
+### 1. Install and sign in to Tailscale
 
-Use Node.js 20 or newer on a computer with a graphical desktop:
+Install Tailscale on the computer that will host the worker and sign in. Enable MagicDNS and HTTPS certificates in the Tailscale admin console, then enable Funnel for the tailnet. Tailscale Funnel is available on its free plan and provides a stable `https://<device>.<tailnet>.ts.net` address without purchasing a domain.
+
+On macOS, use a Tailscale build that supports Funnel port sharing. See the [Tailscale Funnel requirements](https://tailscale.com/docs/features/tailscale-funnel).
+
+### 2. Create the ChatGPT browser session
+
+On the hosting computer, install Node.js 20 or newer, then run:
 
 ```sh
-cd services/chatgpt-playwright
+git clone https://github.com/andygeng2023/WIP-AutoBusiness.git
+cd WIP-AutoBusiness/services/chatgpt-playwright
 npm install
-npm run login
+CHATGPT_STORAGE_STATE="$HOME/.autobusiness/chatgpt-auth.json" npm run login
 ```
 
-A browser opens. Sign in to ChatGPT yourself, complete any verification, then return to the terminal and press Enter. The script writes `.auth/chatgpt-state.json`. This file contains authenticated session cookies and must be treated like a password. Never commit it, publish it, or send it to anyone.
+Sign in to ChatGPT in the browser window and finish the login yourself. The session file contains login cookies. Keep it private and never commit or share it.
 
-### 2. Deploy the Playwright worker
+### 3. Configure and start the local worker
 
-Build and deploy `services/chatgpt-playwright/Dockerfile` to a persistent Node container host. Mount a persistent volume at `/data` and place the authenticated state file at `/data/chatgpt-auth.json`. Set these environment variables:
-
-- `PLAYWRIGHT_SERVICE_TOKEN`: a long random secret shared only with the Supabase Edge Function.
-- `CHATGPT_STORAGE_STATE=/data/chatgpt-auth.json`
-- `PORT=8787`
-
-The worker exposes `GET /health` and an authenticated `POST /v1/chat/completions`. Requests are serialized because a single ChatGPT account/browser session is used. The service must be reachable over HTTPS from Supabase. Keep its access token and browser-state file private. If ChatGPT signs the session out, repeat the manual login process and securely replace the mounted state file.
-
-### 3. Configure Supabase
-
-Set Edge Function secrets in the Supabase Dashboard:
-
-- `PLAYWRIGHT_SERVICE_URL`: the HTTPS base URL of the deployed worker, without a trailing slash.
-- `PLAYWRIGHT_SERVICE_TOKEN`: exactly the same random token configured on the worker.
-
-Deploy the new function:
+From `services/chatgpt-playwright`, start the worker with the Supabase project settings used by AutoBusiness:
 
 ```sh
-supabase functions deploy chatgpt-playwright
+export SUPABASE_URL="https://wctlalaitdrzihvthvze.supabase.co"
+export SUPABASE_ANON_KEY="YOUR_SUPABASE_PUBLISHABLE_KEY"
+export CHATGPT_STORAGE_STATE="$HOME/.autobusiness/chatgpt-auth.json"
+export APP_ORIGINS="https://andygeng2023.github.io,http://localhost:5173,http://127.0.0.1:5173"
+npm start
 ```
 
-The function validates the signed-in Supabase user before forwarding requests. The worker token and ChatGPT session never reach the browser frontend.
+Keep this terminal running. In a second terminal, expose it through Tailscale Funnel:
 
-### Operational limitations
+```sh
+tailscale funnel --bg --https=443 http://127.0.0.1:8787
+tailscale funnel status
+```
 
-This is browser automation of the ChatGPT website, not a supported API integration. Website UI changes can require selector updates; responses can fail when ChatGPT changes its login or composer flow, rate limits the account, or expires its session. Browser-based automation may be restricted by ChatGPT terms and account policies; use only an account and session you are authorised to operate. The worker processes one request at a time and the ChatGPT account's own usage limits apply. A hosted worker and persistent volume are required; GitHub Pages and Supabase Edge Functions cannot themselves host a persistent Playwright browser.
+The status output shows the stable HTTPS address. Test it by opening `https://<your-device>.<your-tailnet>.ts.net/health`. It should return JSON with `"ok": true` and `"sessionConfigured": true`.
 
-The previous `openrouter-proxy` function is no longer called by the frontend. Remove its old OpenRouter secrets from Supabase after confirming the new worker is deployed and responding.
+### 4. Connect the AutoBusiness website
 
+In the GitHub repository, open **Settings → Secrets and variables → Actions → Variables** and create a repository variable:
 
-<!-- CI validation branch: no application changes. -->
+- Name: `PLAYWRIGHT_SERVICE_URL`
+- Value: the Tailscale Funnel HTTPS address, without a trailing slash (for example, `https://my-mac.my-tailnet.ts.net`).
+
+Run the **Deploy to GitHub Pages** workflow again. The build injects this public endpoint into the frontend. AutoBusiness sends each request directly to the worker with the signed-in user's Supabase access token.
+
+The worker validates that token against Supabase Auth before accepting a prompt. It also restricts browser origins to the configured AutoBusiness site and local development URLs. The Supabase publishable key is public by design; never use a service-role key here.
+
+### 5. Keep it running
+
+The hosting computer must remain powered on, connected to the internet, and signed in to Tailscale. Keep the Node worker running. Funnel runs in the background and resumes after a Tailscale service restart when configured with `--bg`; after a full computer reboot, make sure the worker process is started again. If the worker is offline, AI requests will fail until it is restarted.
+
+### Operational notes
+
+- This setup has no separate worker-hosting subscription. Tailscale Funnel is available on its free plan, subject to its published bandwidth limits.
+- The worker serializes requests because all employees share one ChatGPT browser session.
+- Browser automation is not an official ChatGPT API. UI changes, account usage limits, or expired sessions can interrupt requests.
+- The ChatGPT session file is equivalent to a password. Store it only on the hosting computer with restricted file permissions.
+- The legacy `supabase/functions/chatgpt-playwright` proxy is no longer used by the frontend after this change. It can be left deployed; it is not part of the direct request path.
