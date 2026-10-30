@@ -579,16 +579,22 @@ export default function App() {
           setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
           const raw = await requestOpenRouter(model, prompt, openRouterKey, (chunk) => {
             rawStream += chunk;
-            const actionPrefix = rawStream.match(/^\\s*\\[\\[START_JOB(?::\\s*[^\\]]+)?\\]\\]\\s*/i);
-            const visible = actionPrefix ? rawStream.slice(actionPrefix[0].length) : /^\\s*\\[\\[NO_REPLY\\]\\]/i.test(rawStream) ? "" : rawStream;
+            const trimmed = rawStream.trimStart();
+            const markerEnd = trimmed.startsWith("[[START_JOB") ? trimmed.indexOf("]]") : -1;
+            const visible = markerEnd >= 0 ? trimmed.slice(markerEnd + 2).trimStart() : trimmed.startsWith("[[NO_REPLY]]") ? "" : trimmed;
             if (visible) setLiveChatDrafts((old) => ({ ...old, [draftKey]: visible }));
           });
-          const actionMatch = raw.match(/^\\s*\\[\\[START_JOB(?::\\s*([^\\]]+))?\\]\\]\\s*/i);
+          const trimmedRaw = raw.trimStart();
+          const markerEnd = trimmedRaw.startsWith("[[START_JOB") ? trimmedRaw.indexOf("]]") : -1;
+          const marker = markerEnd >= 0 ? trimmedRaw.slice(0, markerEnd + 2) : "";
+          const jobTitle = marker.startsWith("[[START_JOB:") ? marker.slice(12, -2).trim() : "";
+          const answerText = markerEnd >= 0 ? trimmedRaw.slice(markerEnd + 2).trim() : trimmedRaw;
           const decision: { action?: string; reply?: string; title?: string; description?: string } = {
-            action: actionMatch ? "start_job" : raw.trim() === "[[NO_REPLY]]" ? "ignore" : "reply",
-            reply: raw.replace(/^\\s*\\[\\[START_JOB(?::\\s*([^\\]]+))?\\]\\]\\s*/i, "").trim(),
-            title: actionMatch?.[1]?.trim(),
+            action: markerEnd >= 0 ? "start_job" : trimmedRaw === "[[NO_REPLY]]" ? "ignore" : "reply",
+            reply: answerText,
+            title: jobTitle,
             description: text
+          };
           };
           if (decision.action === "start_job") {
             const title = (decision.title || text).trim().slice(0, 240);
