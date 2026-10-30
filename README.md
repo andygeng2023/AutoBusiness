@@ -43,21 +43,49 @@ Puter.js is loaded in the browser and is used for private employee chat replies 
 The connector and automation settings are preferences, not integrations with external services. GitHub, Slack, Google Drive, and web-search actions are not wired up. Jobs are run when a user explicitly starts generation; there is no always-on background worker.
 
 
-## OpenRouter server-side proxy
+## ChatGPT browser automation (Playwright)
 
-OpenRouter chat completions are sent through the authenticated `openrouter-proxy` Supabase Edge Function. Provider credentials are never stored in browser storage or included in the frontend bundle.
+Live AI requests are routed through the authenticated `chatgpt-playwright` Supabase Edge Function to a separately hosted Node.js Playwright worker. The worker uses a manually authenticated ChatGPT browser session; no OpenRouter API key or OpenRouter model catalogue is used. Employee prompts, chat history and assignment context are passed to the worker and the response is returned to the existing employee workflows using an OpenAI-compatible streaming response.
 
-Before using live OpenRouter generation, configure the Supabase Edge Function secret `OPENROUTER_API_KEYS` in the Supabase Dashboard. Its value can be a JSON array of keys (recommended), for example `["key-one","key-two"]`, or a comma-, semicolon-, or newline-separated list. A single `OPENROUTER_API_KEY` secret is also accepted for a one-key setup. The proxy trims copy/paste whitespace and surrounding quotes and accepts an optional leading `Bearer` prefix. Store raw keys only; do not include labels or variable names. Do not commit real keys to this repository or paste them into chat.
+### 1. Create the ChatGPT browser session
 
-The proxy selects configured keys round-robin. When OpenRouter returns HTTP 429, that key is skipped for a four-hour cooldown within the running Edge Function instance and the next available key is tried. The proxy preserves upstream streaming responses and requires a valid signed-in Supabase user JWT. Cooldown state is in-memory and can reset when Supabase replaces an Edge Function instance; this is best-effort key rotation, not a durable cross-instance rate-limit ledger. Provider-wide/account-wide limits may still affect every key.
+Use Node.js 20 or newer on a computer with a graphical desktop:
 
-Set `APP_ORIGINS` only if the app is hosted on additional origins; it accepts a comma-separated allow-list. The GitHub Pages origin and local Vite origins are allowed by default.
+```sh
+cd services/chatgpt-playwright
+npm install
+npm run login
+```
 
-## Build and test
+A browser opens. Sign in to ChatGPT yourself, complete any verification, then return to the terminal and press Enter. The script writes `.auth/chatgpt-state.json`. This file contains authenticated session cookies and must be treated like a password. Never commit it, publish it, or send it to anyone.
 
-- `npm run build` — TypeScript check and production build.
-- `npm test` — Vitest suite.
+### 2. Deploy the Playwright worker
 
-## Deployment
+Build and deploy `services/chatgpt-playwright/Dockerfile` to a persistent Node container host. Mount a persistent volume at `/data` and place the authenticated state file at `/data/chatgpt-auth.json`. Set these environment variables:
 
-GitHub Pages deployment is configured for the `main` branch. Vite uses `/AutoBusiness/` as its base path in GitHub Actions.
+- `PLAYWRIGHT_SERVICE_TOKEN`: a long random secret shared only with the Supabase Edge Function.
+- `CHATGPT_STORAGE_STATE=/data/chatgpt-auth.json`
+- `PORT=8787`
+
+The worker exposes `GET /health` and an authenticated `POST /v1/chat/completions`. Requests are serialized because a single ChatGPT account/browser session is used. The service must be reachable over HTTPS from Supabase. Keep its access token and browser-state file private. If ChatGPT signs the session out, repeat the manual login process and securely replace the mounted state file.
+
+### 3. Configure Supabase
+
+Set Edge Function secrets in the Supabase Dashboard:
+
+- `PLAYWRIGHT_SERVICE_URL`: the HTTPS base URL of the deployed worker, without a trailing slash.
+- `PLAYWRIGHT_SERVICE_TOKEN`: exactly the same random token configured on the worker.
+
+Deploy the new function:
+
+```sh
+supabase functions deploy chatgpt-playwright
+```
+
+The function validates the signed-in Supabase user before forwarding requests. The worker token and ChatGPT session never reach the browser frontend.
+
+### Operational limitations
+
+This is browser automation of the ChatGPT website, not a supported API integration. Website UI changes can require selector updates; responses can fail when ChatGPT changes its login or composer flow, rate limits the account, or expires its session. Browser-based automation may be restricted by ChatGPT terms and account policies; use only an account and session you are authorised to operate. The worker processes one request at a time and the ChatGPT account's own usage limits apply. A hosted worker and persistent volume are required; GitHub Pages and Supabase Edge Functions cannot themselves host a persistent Playwright browser.
+
+The previous `openrouter-proxy` function is no longer called by the frontend. Remove its old OpenRouter secrets from Supabase after confirming the new worker is deployed and responding.
