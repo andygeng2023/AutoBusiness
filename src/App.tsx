@@ -571,7 +571,7 @@ export default function App() {
             ? "This is a group chat. Independently decide whether to reply, start a substantial assignment for yourself, or stay silent. Avoid acknowledgement-only replies and do not impersonate coworkers."
             : "This is a private chat. Decide whether to reply conversationally or open an assignment for yourself if the user has requested meaningful work.";
           const prompt = [
-            { role: "system", content: "You are " + emp.name + ", " + emp.role + " in the " + company?.name + " workspace. Tone: " + emp.tone + ". Custom instructions: " + (emp.instructions || "Be accurate and useful.") + ". Current task: " + (emp.task || "none") + ".\\n" + groupInstruction + "\\nReturn ONLY valid JSON with keys action, reply, title, description. action must be reply, start_job, or ignore. Use start_job when the request requires a substantive deliverable you should own and work on; title should be concise and description should capture the task, constraints, context and success criteria. Use reply for discussion/questions that do not need a tracked deliverable. Use ignore only when you have no useful contribution. In group chat, only employees with a useful role should act. Never claim work is completed before producing it." },
+            { role: "system", content: "You are " + emp.name + ", " + emp.role + " in the " + company?.name + " workspace. Tone: " + emp.tone + ". Custom instructions: " + (emp.instructions || "Be accurate and useful.") + ". Current task: " + (emp.task || "none") + ".\\n" + groupInstruction + "\\nRespond in natural Markdown or plain text, never JSON. If you decide to take ownership of a substantial task, begin with [[START_JOB: concise title]] on its own line, then continue with a brief acknowledgement. If you have no useful contribution, return exactly [[NO_REPLY]]. Otherwise reply naturally. Decide independently; silence is acceptable. Never claim work is completed before producing it." },
             { role: "user", content: workspaceMemoryFor(emp) + "\\n\\nCURRENT CONVERSATION (" + activeConversation.name + "):\\n" + (dialogue || "(No previous messages.)") + "\\n\\nLATEST REQUEST: " + text + "\\n\\nUse all supplied memory consistently. Do not create duplicate assignments for work already completed or in progress unless the user clearly requests a new one." }
           ];
           const draftKey = activeConversation.id + ":" + emp.id;
@@ -579,17 +579,17 @@ export default function App() {
           setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
           const raw = await requestOpenRouter(model, prompt, openRouterKey, (chunk) => {
             rawStream += chunk;
-            const partial = partialJsonField(rawStream, "reply");
-            if (partial) setLiveChatDrafts((old) => ({ ...old, [draftKey]: partial }));
+            const actionPrefix = rawStream.match(/^\\s*\\[\\[START_JOB(?::\\s*[^\\]]+)?\\]\\]\\s*/i);
+            const visible = actionPrefix ? rawStream.slice(actionPrefix[0].length) : /^\\s*\\[\\[NO_REPLY\\]\\]/i.test(rawStream) ? "" : rawStream;
+            if (visible) setLiveChatDrafts((old) => ({ ...old, [draftKey]: visible }));
           });
-          let decision: { action?: string; reply?: string; title?: string; description?: string } = {};
-          try {
-            const json = raw.trim().replace(/^\x60\x60\x60(?:json)?\s*/i, "").replace(/\s*\x60\x60\x60$/, "");
-            decision = JSON.parse(json);
-          } catch {
-            // Gracefully support a provider response that ignored the JSON-only instruction.
-            decision = { action: raw.trim() && raw.trim() !== "[[NO_REPLY]]" ? "reply" : "ignore", reply: raw.trim() };
-          }
+          const actionMatch = raw.match(/^\\s*\\[\\[START_JOB(?::\\s*([^\\]]+))?\\]\\]\\s*/i);
+          const decision: { action?: string; reply?: string; title?: string; description?: string } = {
+            action: actionMatch ? "start_job" : raw.trim() === "[[NO_REPLY]]" ? "ignore" : "reply",
+            reply: raw.replace(/^\\s*\\[\\[START_JOB(?::\\s*([^\\]]+))?\\]\\]\\s*/i, "").trim(),
+            title: actionMatch?.[1]?.trim(),
+            description: text
+          };
           if (decision.action === "start_job") {
             const title = (decision.title || text).trim().slice(0, 240);
             const job: Job = { id: crypto.randomUUID(), title: title || "Employee task", description: (decision.description || text).trim(), employeeId: emp.id, status: "In progress", priority: "Normal", created: new Date().toISOString(), createdBy: user?.id };
