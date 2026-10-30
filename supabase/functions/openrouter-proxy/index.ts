@@ -92,6 +92,7 @@ Deno.serve(async (req: Request) => {
     try {
       upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
+        signal: AbortSignal.timeout(25000),
         headers: {
           "Authorization": "Bearer " + key,
           "Content-Type": "application/json",
@@ -105,8 +106,25 @@ Deno.serve(async (req: Request) => {
           stream: true,
         }),
       });
-    } catch {
-      return jsonError("Could not connect to OpenRouter. Try again shortly.", 502, corsHeaders(origin));
+    } catch (error) {
+      const detail = error instanceof Error ? error : new Error(String(error));
+      const errorName = detail.name || "UnknownError";
+      const errorMessage = detail.message || "No error message";
+      // Log diagnostic metadata only. Never log the request, headers, or API key.
+      console.error("OpenRouter upstream fetch failed", {
+        errorName,
+        errorMessage: errorMessage.slice(0, 300),
+        model: payload.model,
+        region: Deno.env.get("SB_REGION") ?? "unknown",
+      });
+      const timedOut = errorName === "TimeoutError" || errorName === "AbortError";
+      return jsonError(
+        timedOut
+          ? "OpenRouter did not respond within 25 seconds. Try again."
+          : `The proxy could not establish an OpenRouter connection (${errorName}). Check the Supabase function logs for the diagnostic detail.`,
+        502,
+        corsHeaders(origin),
+      );
     }
 
     if (upstream.status === 429) {
