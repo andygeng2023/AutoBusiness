@@ -4,16 +4,41 @@ import path from "node:path";
 import { chromium } from "playwright";
 
 const PORT = Number(process.env.PORT || 8787);
-const ACCESS_TOKEN = process.env.PLAYWRIGHT_SERVICE_TOKEN || "";
 const STATE_PATH = process.env.CHATGPT_STORAGE_STATE || "/data/chatgpt-auth.json";
 const CHATGPT_URL = process.env.CHATGPT_URL || "https://chatgpt.com/";
+const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
+const ALLOWED_ORIGINS = new Set(
+  (process.env.APP_ORIGINS || "https://andygeng2023.github.io,http://localhost:5173,http://127.0.0.1:5173")
+    .split(",").map(value => value.trim()).filter(Boolean)
+);
 const MAX_BODY = 120_000;
 let browserContext;
 let requestQueue = Promise.resolve();
 
-function json(res, status, payload) {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+function corsHeaders(origin) {
+  if (!origin || !ALLOWED_ORIGINS.has(origin)) return {};
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Headers": "authorization, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Max-Age": "86400",
+    "Vary": "Origin"
+  };
+}
+function json(res, status, payload, headers = {}) {
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers });
   res.end(JSON.stringify(payload));
+}
+async function validateSupabaseSession(req) {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Worker authentication is not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY.");
+  const authorization = req.headers.authorization || "";
+  if (!/^Bearer\s+\S+$/i.test(authorization)) return false;
+  const response = await fetch(SUPABASE_URL + "/auth/v1/user", {
+    headers: { Authorization: authorization, apikey: SUPABASE_ANON_KEY },
+    signal: AbortSignal.timeout(10_000)
+  });
+  return response.ok;
 }
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -80,16 +105,51 @@ function sse(res, text) {
   res.end("data: [DONE]\n\n");
 }
 const server = http.createServer(async (req, res) => {
-  if (req.url === "/health" && req.method === "GET") return json(res, 200, { ok: true, provider: "chatgpt-playwright", authenticatedStatePresent: fs.existsSync(STATE_PATH) });
-  if (req.url !== "/v1/chat/completions" || req.method !== "POST") return json(res, 404, { error: { message: "Not found." } });
-  if (!ACCESS_TOKEN || req.headers.authorization !== "Bearer " + ACCESS_TOKEN) return json(res, 401, { error: { message: "Unauthorized." } });
+  const origin = req.headers.origin || "";
+  if (req.url === "/health" && req.method === "GET") {
+    return json(res, 200, { ok: true, provider: "chatgpt-playwright", sessionConfigured: fs.existsSync(STATE_PATH) });
+  }
+  if (req.method === "OPTIONS") {
+    if (!origin || !ALLOWED_ORIGINS.has(origin)) return json(res, 403, { error: { message: "Origin is not allowed." } });
+    res.writeHead(204, corsHeaders(origin));
+    return res.end();
+  }
+  if (req.url !== "/v1/chat/completions" || req.method !== "POST") {
+    return json(res, 404, { error: { message: "Not found." } }, corsHeaders(origin));
+  }
+  if (origin && !ALLOWED_ORIGINS.has(origin)) {
+    return json(res, 403, { error: { message: "Origin is not allowed." } });
+  }
+  try {
+    if (!(await validateSupabaseSession(req))) {
+      return json(res, 401, { error: { message: "Your AutoBusiness sign-in session is invalid or expired." } }, corsHeaders(origin));
+    }
+  } catch (error) {
+    console.error("Supabase session validation failed:", error?.message || error);
+    return json(res, 503, { error: { message: error?.message || "Could not validate your AutoBusiness session." } }, corsHeaders(origin));
+  }
   let payload;
-  try { payload = await readBody(req); } catch (error) { return json(res, 400, { error: { message: error.message } }); }
+  try { payload = await readBody(req); } catch (error) {
+    return json(res, 400, { error: { message: error.message } }, corsHeaders(origin));
+  }
   let messages;
-  try { messages = normaliseMessages(payload.messages); } catch (error) { return json(res, 400, { error: { message: error.message } }); }
+  try { messages = normaliseMessages(payload.messages); } catch (error) {
+    return json(res, 400, { error: { message: error.message } }, corsHeaders(origin));
+  }
   const task = requestQueue.then(() => runChatGPT(messages));
   requestQueue = task.catch(() => {});
-  try { const answer = await task; sse(res, answer); }
-  catch (error) { console.error("ChatGPT Playwright request failed:", error?.message || error); json(res, 502, { error: { message: error?.message || "ChatGPT browser request failed." } }); }
+  try {
+    const answer = await task;
+    const headers = corsHeaders(origin);
+    res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", "connection": "keep-alive", "x-accel-buffering": "no", ...headers });
+    const id = "chatcmpl-" + crypto.randomUUID();
+    const chunk = { id, object: "chat.completion.chunk", created: Math.floor(Date.now()/1000), model: "chatgpt-web", choices: [{ index: 0, delta: { role: "assistant", content: answer }, finish_reason: null }] };
+    res.write("data: " + JSON.stringify(chunk) + "\n\n");
+    res.write("data: " + JSON.stringify({ id, object: "chat.completion.chunk", created: Math.floor(Date.now()/1000), model: "chatgpt-web", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }) + "\n\n");
+    res.end("data: [DONE]\n\n");
+  } catch (error) {
+    console.error("ChatGPT Playwright request failed:", error?.message || error);
+    json(res, 502, { error: { message: error?.message || "ChatGPT browser request failed." } }, corsHeaders(origin));
+  }
 });
 server.listen(PORT, "0.0.0.0", () => console.log("AutoBusiness ChatGPT Playwright worker listening on " + PORT));
