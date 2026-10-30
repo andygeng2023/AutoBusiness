@@ -156,6 +156,66 @@ const requestOpenRouter = async (model: string, messages: Array<{ role: string; 
 };
 
 
+type EmployeeOutput = { action: "reply" | "start_job" | "ignore"; reply: string; title?: string; description?: string };
+const parseEmployeeOutput = (source: string): EmployeeOutput => {
+  const trimmed = source.trim();
+  let candidate = trimmed;
+  if (candidate.toLowerCase().startsWith("```json")) {
+    const lineEnd = candidate.indexOf("\n");
+    if (lineEnd >= 0) {
+      candidate = candidate.slice(lineEnd + 1).trim();
+      if (candidate.endsWith("```")) candidate = candidate.slice(0, -3).trim();
+    }
+  }
+  try {
+    const value = JSON.parse(candidate);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const action = typeof value.action === "string" ? value.action.toLowerCase() : "";
+      const reply = typeof value.reply === "string" ? value.reply : typeof value.message === "string" ? value.message : typeof value.content === "string" ? value.content : "";
+      if (action === "ignore" || action === "no_reply" || reply.trim() === "[[NO_REPLY]]") return { action: "ignore", reply: "" };
+      if (action === "start_job" || action === "start_assignment") return {
+        action: "start_job",
+        reply,
+        title: typeof value.title === "string" ? value.title : "",
+        description: typeof value.description === "string" ? value.description : ""
+      };
+      if (reply) return { action: "reply", reply };
+    }
+  } catch { /* Treat ordinary Markdown as text. */ }
+  if (trimmed === "[[NO_REPLY]]") return { action: "ignore", reply: "" };
+  if (trimmed.startsWith("[[START_JOB")) {
+    const markerEnd = trimmed.indexOf("]]");
+    if (markerEnd >= 0) {
+      const marker = trimmed.slice(0, markerEnd + 2);
+      return {
+        action: "start_job",
+        reply: trimmed.slice(markerEnd + 2).trim(),
+        title: marker.startsWith("[[START_JOB:") ? marker.slice(12, -2).trim() : ""
+      };
+    }
+  }
+  return { action: trimmed ? "reply" : "ignore", reply: trimmed };
+};
+const visibleEmployeeText = (source: string) => {
+  const trimmed = source.trimStart();
+  const markerPrefix = "[[START_JOB";
+  if (trimmed.startsWith(markerPrefix) || markerPrefix.startsWith(trimmed)) {
+    const markerEnd = trimmed.indexOf("]]");
+    return markerEnd >= 0 ? trimmed.slice(markerEnd + 2).trimStart() : "";
+  }
+  if ("[[NO_REPLY]]".startsWith(trimmed)) return "";
+  if (trimmed.startsWith("{")) {
+    try {
+      const value = JSON.parse(trimmed);
+      if (value && typeof value === "object") {
+        if (value.action === "ignore" || value.action === "no_reply") return "";
+        return typeof value.reply === "string" ? value.reply : typeof value.message === "string" ? value.message : typeof value.content === "string" ? value.content : "";
+      }
+    } catch { return ""; }
+  }
+  return trimmed;
+};
+
 declare global { interface Window {} }
 
 export default function App() {
@@ -581,25 +641,10 @@ export default function App() {
           setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
           const raw = await requestOpenRouter(model, prompt, openRouterKey, (chunk) => {
             rawStream += chunk;
-            const trimmed = rawStream.trimStart();
-            const isStartJob = trimmed.startsWith("[[START_JOB");
-            const isStartJobPrefix = "[[START_JOB".startsWith(trimmed);
-            const markerEnd = isStartJob ? trimmed.indexOf("]]") : -1;
-            const isNoReplyPrefix = "[[NO_REPLY]]".startsWith(trimmed);
-            const visible = isStartJob || isStartJobPrefix ? markerEnd >= 0 ? trimmed.slice(markerEnd + 2).trimStart() : "" : isNoReplyPrefix ? "" : trimmed;
+            const visible = visibleEmployeeText(rawStream);
             if (visible) setLiveChatDrafts((old) => ({ ...old, [draftKey]: visible }));
           });
-          const trimmedRaw = raw.trimStart();
-          const markerEnd = trimmedRaw.startsWith("[[START_JOB") ? trimmedRaw.indexOf("]]") : -1;
-          const marker = markerEnd >= 0 ? trimmedRaw.slice(0, markerEnd + 2) : "";
-          const jobTitle = marker.startsWith("[[START_JOB:") ? marker.slice(12, -2).trim() : "";
-          const answerText = markerEnd >= 0 ? trimmedRaw.slice(markerEnd + 2).trim() : trimmedRaw;
-          const decision: { action?: string; reply?: string; title?: string; description?: string } = {
-            action: markerEnd >= 0 ? "start_job" : trimmedRaw === "[[NO_REPLY]]" ? "ignore" : "reply",
-            reply: answerText,
-            title: jobTitle,
-            description: text
-          };
+          const decision = parseEmployeeOutput(raw);
           if (decision.action === "start_job") {
             const title = (decision.title || text).trim().slice(0, 240);
             const job: Job = { id: crypto.randomUUID(), title: title || "Employee task", description: (decision.description || text).trim(), employeeId: emp.id, status: "In progress", priority: "Normal", created: new Date().toISOString(), updatedAt: new Date().toISOString(), createdBy: user?.id };
@@ -733,11 +778,14 @@ export default function App() {
         let streamed = "";
         if (draftKey) setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
         try {
-          return (await requestOpenRouter(modelFor(employee), messages, openRouterKey, (chunk) => {
+          const rawOutput = await requestOpenRouter(modelFor(employee), messages, openRouterKey, (chunk) => {
             streamed += chunk;
-            if (draftKey) setLiveChatDrafts((old) => ({ ...old, [draftKey]: streamed }));
-            if (showInJob) setJobs((old) => old.map((item) => item.id === jobId ? { ...item, result: streamed } : item));
-          })).trim();
+            const visible = visibleEmployeeText(streamed);
+            if (draftKey) setLiveChatDrafts((old) => ({ ...old, [draftKey]: visible }));
+            if (showInJob) setJobs((old) => old.map((item) => item.id === jobId ? { ...item, result: visible } : item));
+          });
+          const parsedOutput = parseEmployeeOutput(rawOutput);
+          return parsedOutput.reply || rawOutput.trim();
         } finally {
           if (draftKey) setLiveChatDrafts((old) => {
             const next = { ...old };
@@ -968,8 +1016,9 @@ export default function App() {
             });
           }
 
-          const reply = response.trim();
-          if (!reply || reply === "[[NO_REPLY]]") continue;
+          const parsedResponse = parseEmployeeOutput(response);
+          const reply = parsedResponse.reply.trim();
+          if (parsedResponse.action === "ignore" || !reply) continue;
 
           const message: Message = {
             id: crypto.randomUUID(),
