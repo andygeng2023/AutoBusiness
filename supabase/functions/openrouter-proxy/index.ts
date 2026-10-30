@@ -35,6 +35,12 @@ function configuredKeys(): string[] {
   return [...new Set(raw.split(",").map((key) => key.trim()).filter(Boolean))];
 }
 
+function isSafeApiKey(key: string): boolean {
+  // HTTP header values must be ASCII here. Reject whitespace, control characters,
+  // and Unicode rather than allowing one malformed secret to break every request.
+  return /^[\\x21-\\x7E]+$/.test(key);
+}
+
 function orderedKeys(keys: string[]): string[] {
   const now = Date.now();
   for (const [key, until] of cooldownUntil) if (until <= now) cooldownUntil.delete(key);
@@ -73,8 +79,16 @@ Deno.serve(async (req: Request) => {
     return jsonError("Each message must have a supported role and text content under 50,000 characters.", 400, corsHeaders(origin));
   }
 
-  const keys = configuredKeys();
-  if (!keys.length) return jsonError("The server-side OpenRouter key pool is not configured. Add OPENROUTER_API_KEYS to Supabase Edge Function secrets.", 503, corsHeaders(origin));
+  const configured = configuredKeys();
+  const keys = configured.filter(isSafeApiKey);
+  if (!configured.length) return jsonError("The server-side OpenRouter key pool is not configured. Add OPENROUTER_API_KEYS to Supabase Edge Function secrets.", 503, corsHeaders(origin));
+  if (!keys.length) {
+    console.error("OpenRouter key pool contains no valid ASCII API keys", { configuredKeyCount: configured.length });
+    return jsonError("The OpenRouter key pool contains invalid key formatting. Re-enter the keys as plain ASCII API keys in Supabase Edge Function secrets.", 503, corsHeaders(origin));
+  }
+  if (keys.length !== configured.length) {
+    console.error("Ignored malformed OpenRouter keys", { configuredKeyCount: configured.length, usableKeyCount: keys.length });
+  }
 
   const candidates = orderedKeys(keys);
   if (!candidates.length) {
