@@ -583,9 +583,10 @@ export default function App() {
             rawStream += chunk;
             const trimmed = rawStream.trimStart();
             const isStartJob = trimmed.startsWith("[[START_JOB");
+            const isStartJobPrefix = "[[START_JOB".startsWith(trimmed);
             const markerEnd = isStartJob ? trimmed.indexOf("]]") : -1;
             const isNoReplyPrefix = "[[NO_REPLY]]".startsWith(trimmed);
-            const visible = isStartJob ? markerEnd >= 0 ? trimmed.slice(markerEnd + 2).trimStart() : "" : isNoReplyPrefix ? "" : trimmed;
+            const visible = isStartJob || isStartJobPrefix ? markerEnd >= 0 ? trimmed.slice(markerEnd + 2).trimStart() : "" : isNoReplyPrefix ? "" : trimmed;
             if (visible) setLiveChatDrafts((old) => ({ ...old, [draftKey]: visible }));
           });
           const trimmedRaw = raw.trimStart();
@@ -764,7 +765,7 @@ export default function App() {
           const contribution = await streamEmployeeOutput(contributor, [
             { role: "system", content: "You are " + contributor.name + ", " + contributor.role + " in " + departmentPath(contributor.deptId) + ". You are collaborating with " + emp.name + " on the SAME deliverable. Return a focused, useful contribution that can be incorporated into the shared document, not a separate deliverable. Explain assumptions briefly, avoid repeating the whole draft, and never invent company facts. Keep the contribution under 700 words." },
             { role: "user", content: "SHARED JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nCURRENT DRAFT FROM " + emp.name + ":\n" + draft + "\n\nProvide the most valuable complementary section or improvements for this same deliverable." }
-          ]);
+          ], true);
           if (contribution) {
             addWorkNote(contributor.id, "I’ve reviewed " + emp.name + "’s draft and contributed the following material to the shared deliverable:\n\n" + contribution.slice(0, 1400));
             const integrated = await streamEmployeeOutput(emp, [
@@ -783,7 +784,7 @@ export default function App() {
           reviewFeedback = await streamEmployeeOutput(reviewer, [
             { role: "system", content: "You are " + reviewer.name + ", " + reviewer.role + " and " + (manager?.id === reviewer.id ? "the manager" : "a collaborating colleague") + " of " + emp.name + ". Review the draft against the brief. Give concise, specific feedback: gaps, factual cautions, missing acceptance criteria and concrete improvements. Do not rewrite the entire deliverable and do not invent facts." },
             { role: "user", content: "JOB: " + job.title + "\nBRIEF: " + (job.description || "No additional details supplied.") + "\n\nDRAFT FROM " + emp.name + ":\n" + output + "\n\nProvide a useful peer review in under 250 words." }
-          ]);
+          ], true);
           if (reviewFeedback) {
             const revised = await streamEmployeeOutput(emp, [
               { role: "system", content: "You are " + emp.name + ", " + emp.role + ". Refine your deliverable using the peer review. Keep strong original material, address valid issues, and do not blindly accept unsupported feedback. Produce only the revised final deliverable." },
