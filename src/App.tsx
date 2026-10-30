@@ -361,7 +361,7 @@ export default function App() {
   }, [conversations, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
-    void supabase.from("workspace_settings").upsert({ company_id: company.id, approval_required: settings.approvalRequired, auto_run: settings.autoRun, daily_usage_limit: settings.dailyLimit, monthly_usage_limit: settings.monthlyLimit, enabled_connectors: settings.connectors.map((c) => (({ "FreeInference": "chatgpt_playwright" } as Record<string, string>)[c] ?? c.toLowerCase().replaceAll(" ", "_"))) }, { onConflict: "company_id" }).then(({ error }) => { if (error) notify("Settings save failed: " + error.message); });
+    void supabase.from("workspace_settings").upsert({ company_id: company.id, approval_required: settings.approvalRequired, auto_run: settings.autoRun, daily_usage_limit: settings.dailyLimit, monthly_usage_limit: settings.monthlyLimit, enabled_connectors: settings.connectors.map((c) => (({ "FreeInference": "freeinference" } as Record<string, string>)[c] ?? c.toLowerCase().replaceAll(" ", "_"))) }, { onConflict: "company_id" }).then(({ error }) => { if (error) notify("Settings save failed: " + error.message); });
   }, [settings, loadedCompanyId, company?.id, user?.id]);
   useEffect(() => {
     if (demoMode || !user || !company || loadedCompanyId !== company.id) return;
