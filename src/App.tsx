@@ -682,22 +682,22 @@ export default function App() {
             const submittedAt = new Date().toISOString();
             setJobs((old) => old.map((item) => item.id === job.id ? { ...item, status: "Submitted", result: deliverable, submittedAt, updatedAt: submittedAt } : item));
             setEmployees((old) => old.map((employee) => employee.id === emp.id ? { ...employee, status: "Needs review", task: job.title } : employee));
-            return { emp, answer: "I’ve opened an assignment for myself: " + job.title + "\\n\\nI’ve completed a first deliverable and submitted it for review. You can inspect it in Jobs & approvals.", error: "", jobId: job.id };
+            return { emp, answer: "I’ve opened an assignment for myself: " + job.title + "\\n\\nI’ve completed a first deliverable and submitted it for review. You can inspect it in Jobs & approvals.", error: "", jobId: job.id, respondedAt: submittedAt, respondedTime: nowTime() };
           }
-          if (decision.action === "ignore") return { emp, answer: "[[NO_REPLY]]", error: "" };
-          return { emp, answer: (decision.reply || raw).trim(), error: "", jobId: undefined };
+          if (decision.action === "ignore") return { emp, answer: "[[NO_REPLY]]", error: "", jobId: undefined, respondedAt: undefined, respondedTime: undefined };
+          return { emp, answer: (decision.reply || raw).trim(), error: "", jobId: undefined, respondedAt: new Date().toISOString(), respondedTime: nowTime() };
         } catch (error) {
-          return { emp, answer: "", error: describeError(error, "Unknown OpenRouter error"), jobId: undefined };
+          return { emp, answer: "", error: describeError(error, "Unknown OpenRouter error"), jobId: undefined, respondedAt: undefined, respondedTime: undefined };
         }
       }));
 
       setLiveChatDrafts({});
       const responses: Message[] = replies
         .filter(({ answer }) => answer && answer !== "[[NO_REPLY]]")
-        .map(({ emp, answer, jobId }) => ({ id: crypto.randomUUID(), from: emp.id, text: answer, time: nowTime(), createdAt: new Date().toISOString(), jobId }));
+        .map(({ emp, answer, jobId, respondedAt, respondedTime }) => ({ id: crypto.randomUUID(), from: emp.id, text: answer, time: respondedTime ?? nowTime(), createdAt: respondedAt ?? new Date().toISOString(), jobId }));
 
       if (responses.length) {
-        setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, ...responses] } : c));
+        setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: chronologicalMessages([...c.messages, ...responses]) } : c));
       } else if (activeConversation.kind === "group" && !replies.some(({ error }) => error)) {
         setConversations((old) => old.map((c) => c.id === activeConversation.id ? { ...c, messages: [...c.messages, { id: crypto.randomUUID(), from: "system", text: "The team reviewed the message; nobody had a useful contribution to add yet.", time: nowTime(), createdAt: new Date().toISOString() }] } : c));
       }
