@@ -552,7 +552,7 @@ export default function App() {
       const groupMembers = activeConversation.members.map((id) => employeeMap.get(id)).filter((emp): emp is Employee => Boolean(emp) && emp?.status !== "Paused");
       // Limit each group turn to two colleagues; others can join when a later message needs their expertise.
       const targets = activeConversation.kind === "group"
-        ? groupMembers.slice(0, 2)
+        ? [...groupMembers.slice(activeConversation.messages.length % Math.max(1, groupMembers.length)), ...groupMembers.slice(0, activeConversation.messages.length % Math.max(1, groupMembers.length))].slice(0, 2)
         : activeConversation.members.length === 1
           ? [employeeMap.get(activeConversation.members[0])].filter((emp): emp is Employee => Boolean(emp))
           : [];
