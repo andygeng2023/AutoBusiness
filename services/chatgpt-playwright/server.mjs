@@ -68,6 +68,7 @@ async function runChatGPT(messages) {
     return answer;
   } finally {
     await page.close().catch(() => {});
+    await context.storageState({ path: STATE_PATH }).catch((error) => console.error("Could not refresh stored ChatGPT session:", error?.message || error));
   }
 }
 function sse(res, text) {
