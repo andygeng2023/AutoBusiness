@@ -595,7 +595,6 @@ export default function App() {
             title: jobTitle,
             description: text
           };
-          };
           if (decision.action === "start_job") {
             const title = (decision.title || text).trim().slice(0, 240);
             const job: Job = { id: crypto.randomUUID(), title: title || "Employee task", description: (decision.description || text).trim(), employeeId: emp.id, status: "In progress", priority: "Normal", created: new Date().toISOString(), createdBy: user?.id };
