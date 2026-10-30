@@ -171,7 +171,7 @@ const parseEmployeeOutput = (source: string): EmployeeOutput => {
     const value = JSON.parse(candidate);
     if (value && typeof value === "object" && !Array.isArray(value)) {
       const action = typeof value.action === "string" ? value.action.toLowerCase() : "";
-      const reply = typeof value.reply === "string" ? value.reply : typeof value.message === "string" ? value.message : typeof value.content === "string" ? value.content : "";
+      const reply = typeof value.reply === "string" ? value.reply : typeof value.message === "string" ? value.message : typeof value.content === "string" ? value.content : typeof value.response === "string" ? value.response : typeof value.text === "string" ? value.text : "";
       if (action === "ignore" || action === "no_reply" || reply.trim() === "[[NO_REPLY]]") return { action: "ignore", reply: "" };
       if (action === "start_job" || action === "start_assignment") return {
         action: "start_job",
@@ -204,12 +204,17 @@ const visibleEmployeeText = (source: string) => {
     return markerEnd >= 0 ? trimmed.slice(markerEnd + 2).trimStart() : "";
   }
   if ("[[NO_REPLY]]".startsWith(trimmed)) return "";
-  if (trimmed.startsWith("{")) {
+  let jsonCandidate = trimmed;
+  if (jsonCandidate.toLowerCase().startsWith("```json")) {
+    const lineEnd = jsonCandidate.indexOf("\n");
+    jsonCandidate = lineEnd >= 0 ? jsonCandidate.slice(lineEnd + 1).trimStart() : "";
+  }
+  if (jsonCandidate.startsWith("{")) {
     try {
-      const value = JSON.parse(trimmed);
+      const value = JSON.parse(jsonCandidate);
       if (value && typeof value === "object") {
         if (value.action === "ignore" || value.action === "no_reply") return "";
-        return typeof value.reply === "string" ? value.reply : typeof value.message === "string" ? value.message : typeof value.content === "string" ? value.content : "";
+        return typeof value.reply === "string" ? value.reply : typeof value.message === "string" ? value.message : typeof value.content === "string" ? value.content : typeof value.response === "string" ? value.response : typeof value.text === "string" ? value.text : "";
       }
     } catch { return ""; }
   }
@@ -1324,7 +1329,7 @@ export default function App() {
             {showChatDetails && <aside className="chat-details-panel"><div className="chat-details-title"><div><strong>People in this chat</strong><small>{activeConversation?.members.length ?? 0} employees</small></div><button className="tiny-icon" onClick={() => setShowChatDetails(false)} aria-label="Close people panel">×</button></div>{activeConversation?.members.length ? activeConversation.members.map((memberId) => employeeMap.get(memberId)).filter((e): e is Employee => Boolean(e) && (e!.name + " " + e!.role).toLowerCase().includes(search.toLowerCase())).map((e) => <button className="chat-detail-person" key={e.id} onClick={() => { setProfileEmployeeId(e.id); setShowChatDetails(false); }}><span className="avatar small">{initials(e.name)}</span><span><strong>{e.name}</strong><small>{e.role} · reports to {managerNameFor(e.managerId)}</small></span><ChevronRight size={15} /></button>) : <p className="chat-details-empty">No employees are in this conversation.</p>}</aside>}
             <div className="message-stream">{activeConversation?.messages.map((m) => <div key={m.id} className={"message-row " + (m.from === "you" ? "mine" : "")}><span className="avatar tiny">{initials(employeeNameFor(m.from))}</span><div className="message-content"><div className="message-meta"><strong>{employeeNameFor(m.from)}</strong><span>{m.time}</span></div><div className="message-bubble"><MarkdownPreview content={m.text} /></div>{m.jobId && <button className="message-job-link" onClick={() => { changePage("Jobs & approvals"); setSelectedJobId(m.jobId ?? null); }}><Inbox size={13} /> View job and deliverable</button>}</div></div>)}
               {Object.entries(liveChatDrafts).filter(([key, draft]) => key.startsWith((activeConversation?.id ?? "") + ":") && draft).map(([key, draft]) => { const employeeId = key.split(":")[1]; return <div className="message-row" key={key}><span className="avatar tiny">{initials(employeeNameFor(employeeId))}</span><div className="message-content"><div className="message-meta"><strong>{employeeNameFor(employeeId)}</strong><span>typing</span></div><div className="message-bubble streaming-bubble"><MarkdownPreview content={draft} /><span className="streaming-cursor" /></div></div></div>; })}
-              {busy && !Object.keys(liveChatDrafts).some((key) => key.startsWith((activeConversation?.id ?? "") + ":")) && <div className="typing-indicator"><span /><span /><span /> A colleague is deciding whether to contribute…</div>}
+              {busy && !Object.entries(liveChatDrafts).some(([key, draft]) => key.startsWith((activeConversation?.id ?? "") + ":") && Boolean(draft)) && <div className="typing-indicator"><span /><span /><span /> A colleague is deciding whether to contribute…</div>}
               {!activeConversation?.messages.length && <div className="chat-empty"><span className="chat-empty-icon"><MessageCircle size={22} /></span><strong>Start the conversation</strong><p>Send a message. Employees decide whether to reply or open and complete assignments themselves.</p></div>}
             </div>
             <div className="chat-composer-area"><div className="composer-tools"><span>{demoMode ? "Demo messages stay in this session" : "Messages are saved to your cloud workspace"}</span></div><form className="chat-composer" onSubmit={sendMessage}><textarea value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement)?.requestSubmit(); } }} placeholder={"Message " + (activeConversation?.name ?? "your team") + "…"} rows={2} /><button className="send-button" type="submit" disabled={!message.trim()} aria-label="Send message"><Send size={17} /></button></form><small className="composer-hint">Enter to send · Shift + Enter for a new line</small></div>
