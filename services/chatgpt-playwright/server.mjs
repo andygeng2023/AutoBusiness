@@ -39,19 +39,9 @@ function transcript(messages) {
 async function getContext() {
   if (browserContext) return browserContext;
   if (!fs.existsSync(STATE_PATH)) throw new Error("ChatGPT browser session is not configured. Run the login setup and mount CHATGPT_STORAGE_STATE at " + STATE_PATH + ".");
-  browserContext = await chromium.launchPersistentContext(path.dirname(STATE_PATH), {
-    headless: true,
-    channel: "chromium",
-    args: ["--no-sandbox", "--disable-dev-shm-usage"],
-    viewport: { width: 1440, height: 1000 }
-  }).catch(async () => {
-    // Persistent profile is preferred; if the mounted path is a storage-state file,
-    // use an isolated context loaded from that authenticated state instead.
-    const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
-    const context = await browser.newContext({ storageState: STATE_PATH, viewport: { width: 1440, height: 1000 } });
-    context.on("close", () => browser.close());
-    return context;
-  });
+  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+  browserContext = await browser.newContext({ storageState: STATE_PATH, viewport: { width: 1440, height: 1000 } });
+  browserContext.on("close", () => browser.close());
   return browserContext;
 }
 async function runChatGPT(messages) {
