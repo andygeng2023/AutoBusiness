@@ -205,7 +205,7 @@ const visibleEmployeeText = (source: string) => {
   }
   if ("[[NO_REPLY]]".startsWith(trimmed)) return "";
   let jsonCandidate = trimmed;
-  if (jsonCandidate.toLowerCase().startsWith("```json")) {
+  if ("```json".startsWith(trimmed.toLowerCase()) || jsonCandidate.toLowerCase().startsWith("```json")) {
     const lineEnd = jsonCandidate.indexOf("\n");
     jsonCandidate = lineEnd >= 0 ? jsonCandidate.slice(lineEnd + 1).trimStart() : "";
   }
