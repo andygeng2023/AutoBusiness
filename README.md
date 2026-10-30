@@ -36,59 +36,33 @@ The workspace database lives in Supabase project `wctlalaitdrzihvthvze`. The app
 
 The app currently loads shared data when a workspace is opened; live push updates between already-open browser sessions are not yet implemented. Refresh or reopen the workspace to load changes made by another user. Company owners and admins can invite teammates from Settings → General. Invite links are bound to the intended email address and expire after seven days.
 
-## AI provider and limitations
+## AI provider: FreeInference
 
-Private employee chat replies and job deliverables use the separately deployed ChatGPT Playwright browser worker. A manually authenticated ChatGPT session is stored on the worker host, not in the browser app. AI provider token usage and billing are not exposed by this browser integration, so the dashboard reports saved deliverables and approved jobs rather than invented usage units.
+All live employee chat replies, group-chat decisions, coordination messages, and job deliverables use the FreeInference OpenAI-compatible API through the `freeinference-proxy` Supabase Edge Function. The browser sends the signed-in user's Supabase session and the selected model; the FreeInference API key remains server-side.
 
-The connector and automation settings are preferences, not integrations with external services. GitHub, Slack, Google Drive, and web-search actions are not wired up. Jobs are run when a user explicitly starts generation; there is no always-on background worker.
+### Configure the API key
 
+1. Create a free account at https://freeinference.org and generate an API key.
+2. Open the Supabase project `wctlalaitdrzihvthvze`.
+3. Go to Edge Functions → Secrets.
+4. Add `FREEINFERENCE_API_KEY` with the key you generated. Do not put it in GitHub, frontend environment variables, or workspace settings.
+5. The secret is available to the deployed function immediately; no redeployment is required.
 
-## ChatGPT browser automation (Playwright)
+### Models
 
-Live AI requests are routed through the authenticated `chatgpt-playwright` Supabase Edge Function to a separately hosted Node.js Playwright worker. The worker uses a manually authenticated ChatGPT browser session; no OpenRouter API key or OpenRouter model catalogue is used. Employee prompts, chat history and assignment context are passed to the worker and the response is returned to the existing employee workflows using an OpenAI-compatible streaming response.
+The app offers these FreeInference free models by default:
 
-### 1. Create the ChatGPT browser session
+- `glm-5.3-flash` — general reasoning and agent work.
+- `deepseek-v4-flash` — complex agentic tasks.
+- `minimax-m3` — long-context and multimodal work.
+- `qwen3.6-35b` — faster, shorter requests.
 
-Use Node.js 20 or newer on a computer with a graphical desktop:
+The provider's authenticated `GET /v1/models` response is the definitive catalogue for the API key. If a model is unavailable to the key, select another model in the employee profile.
 
-```sh
-cd services/chatgpt-playwright
-npm install
-npm run login
-```
+### Runtime and privacy
 
-A browser opens. Sign in to ChatGPT yourself, complete any verification, then return to the terminal and press Enter. The script writes `.auth/chatgpt-state.json`. This file contains authenticated session cookies and must be treated like a password. Never commit it, publish it, or send it to anyone.
+Requests stream through Supabase Edge Functions; no separate worker, browser automation, or additional hosting service is required. Automatic employee coordination and background job generation still run only while the AutoBusiness workspace is open. GitHub Pages does not run background processes after the app is closed.
 
-### 2. Deploy the Playwright worker
+FreeInference states that prompts and responses are logged for research purposes. Do not send confidential information, passwords, API keys, or sensitive personal data through employee conversations. Provider availability and free quotas can change and are not guaranteed.
 
-Build and deploy `services/chatgpt-playwright/Dockerfile` to a persistent Node container host. Mount a persistent volume at `/data` and place the authenticated state file at `/data/chatgpt-auth.json`. Set these environment variables:
-
-- `PLAYWRIGHT_SERVICE_TOKEN`: a long random secret shared only with the Supabase Edge Function.
-- `CHATGPT_STORAGE_STATE=/data/chatgpt-auth.json`
-- `PORT=8787`
-
-The worker exposes `GET /health` and an authenticated `POST /v1/chat/completions`. Requests are serialized because a single ChatGPT account/browser session is used. The service must be reachable over HTTPS from Supabase. Keep its access token and browser-state file private. If ChatGPT signs the session out, repeat the manual login process and securely replace the mounted state file.
-
-### 3. Configure Supabase
-
-Set Edge Function secrets in the Supabase Dashboard:
-
-- `PLAYWRIGHT_SERVICE_URL`: the HTTPS base URL of the deployed worker, without a trailing slash.
-- `PLAYWRIGHT_SERVICE_TOKEN`: exactly the same random token configured on the worker.
-
-Deploy the new function:
-
-```sh
-supabase functions deploy chatgpt-playwright
-```
-
-The function validates the signed-in Supabase user before forwarding requests. The worker token and ChatGPT session never reach the browser frontend.
-
-### Operational limitations
-
-This is browser automation of the ChatGPT website, not a supported API integration. Website UI changes can require selector updates; responses can fail when ChatGPT changes its login or composer flow, rate limits the account, or expires its session. Browser-based automation may be restricted by ChatGPT terms and account policies; use only an account and session you are authorised to operate. The worker processes one request at a time and the ChatGPT account's own usage limits apply. A hosted worker and persistent volume are required; GitHub Pages and Supabase Edge Functions cannot themselves host a persistent Playwright browser.
-
-The previous `openrouter-proxy` function is no longer called by the frontend. Remove its old OpenRouter secrets from Supabase after confirming the new worker is deployed and responding.
-
-
-<!-- CI validation branch: no application changes. -->
+The old Playwright worker is no longer part of the application request path. Its source directory is retained in the repository for now, but the frontend and deployed AI proxy do not call it.
