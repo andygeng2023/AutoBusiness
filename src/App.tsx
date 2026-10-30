@@ -659,9 +659,14 @@ export default function App() {
               { role: "system", content: "You are " + emp.name + ", " + emp.role + ". Complete the assignment and produce the actual deliverable. Follow your instructions: " + (emp.instructions || "Be accurate and useful.") + ". Do not claim external actions or access you do not have. If blocked, clearly report the blocker and what is needed." },
               { role: "user", content: workspaceMemoryFor(emp) + "\\n\\nASSIGNMENT: " + job.title + "\\nBRIEF: " + job.description + "\\n\nCURRENT CHAT CONTEXT:\\n" + dialogue + "\\n\\nUSER'S LATEST REQUEST: " + text + "\\n\\nProduce the deliverable now, not a plan." }
             ];
-            const deliverable = (await requestOpenRouter(model, workPrompt, openRouterKey, (chunk) => {
-              setJobs((old) => old.map((item) => item.id === job.id ? { ...item, result: (item.result || "") + chunk } : item));
-            })).trim();
+            let deliverableStream = "";
+            const rawDeliverable = await requestOpenRouter(model, workPrompt, openRouterKey, (chunk) => {
+              deliverableStream += chunk;
+              const visible = visibleEmployeeText(deliverableStream);
+              setJobs((old) => old.map((item) => item.id === job.id ? { ...item, result: visible } : item));
+            });
+            const parsedDeliverable = parseEmployeeOutput(rawDeliverable);
+            const deliverable = parsedDeliverable.reply || rawDeliverable.trim();
             if (!deliverable) throw new Error("The assignment was opened, but the AI returned an empty deliverable.");
             const submittedAt = new Date().toISOString();
             setJobs((old) => old.map((item) => item.id === job.id ? { ...item, status: "Submitted", result: deliverable, submittedAt, updatedAt: submittedAt } : item));
