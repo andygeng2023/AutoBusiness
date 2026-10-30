@@ -89,3 +89,6 @@ The function validates the signed-in Supabase user before forwarding requests. T
 This is browser automation of the ChatGPT website, not a supported API integration. Website UI changes can require selector updates; responses can fail when ChatGPT changes its login or composer flow, rate limits the account, or expires its session. Browser-based automation may be restricted by ChatGPT terms and account policies; use only an account and session you are authorised to operate. The worker processes one request at a time and the ChatGPT account's own usage limits apply. A hosted worker and persistent volume are required; GitHub Pages and Supabase Edge Functions cannot themselves host a persistent Playwright browser.
 
 The previous `openrouter-proxy` function is no longer called by the frontend. Remove its old OpenRouter secrets from Supabase after confirming the new worker is deployed and responding.
+
+
+<!-- CI validation branch: no application changes. -->
