@@ -61,6 +61,17 @@ type Employee = { id: string; name: string; role: string; deptId: string; manage
 type Dept = { id: string; name: string; parentId?: string };
 type Job = { id: string; title: string; description?: string; employeeId: string; status: "Queued" | "In progress" | "Submitted" | "Approved" | "Rejected"; priority: "Normal" | "Urgent"; created: string; updatedAt?: string; result?: string; submittedAt?: string; reviewNote?: string; createdBy?: string; reviewedBy?: string };
 type Message = { id: string; from: string; text: string; time: string; jobId?: string; createdAt?: string; senderUserId?: string };
+const chronologicalMessages = (messages: Message[]): Message[] => messages
+  .map((message, index) => ({ message, index, timestamp: message.createdAt ? Date.parse(message.createdAt) : Number.NaN }))
+  .sort((a, b) => {
+    const aValid = Number.isFinite(a.timestamp);
+    const bValid = Number.isFinite(b.timestamp);
+    if (!aValid && !bValid) return a.index - b.index;
+    if (!aValid) return -1;
+    if (!bValid) return 1;
+    return a.timestamp - b.timestamp || a.index - b.index;
+  })
+  .map(({ message }) => message);
 type Conversation = { id: string; name: string; kind: "private" | "group"; members: string[]; messages: Message[]; createdBy?: string };
 type Company = { id: string; name: string; industry: string; initials: string; color: string; description: string };
 type Goal = { id: string; title: string; description: string; progress: number; dueDate?: string; status: "planned" | "active" | "paused" | "completed"; createdBy?: string };
