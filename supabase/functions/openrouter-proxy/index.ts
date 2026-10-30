@@ -23,7 +23,7 @@ const jsonError = (message: string, status: number, headers: HeadersInit = {}) =
     headers: { "Content-Type": "application/json", ...headers },
   });
 
-type KeyPoolSource = "OPENROUTER_API_KEYS" | "OPENROUTER_API_KEY" | "none";
+type KeyPoolSource = "OPENROUTER_API_KEYS" | "OPENROUTER_API_KEY" | "both" | "none";
 type KeyPool = { keys: string[]; rawEntries: string[]; source: KeyPoolSource };
 
 function normalizeApiKey(value: string): string {
@@ -37,33 +37,45 @@ function normalizeApiKey(value: string): string {
   return key.replace(/[\s\u200B-\u200D\uFEFF]+/g, "");
 }
 
-function configuredKeys(): KeyPool {
-  const plural = Deno.env.get("OPENROUTER_API_KEYS") ?? "";
-  const singular = Deno.env.get("OPENROUTER_API_KEY") ?? "";
-  const raw = plural.trim() ? plural : singular;
-  const source: KeyPoolSource = plural.trim()
-    ? "OPENROUTER_API_KEYS"
-    : singular.trim()
-    ? "OPENROUTER_API_KEY"
-    : "none";
-  if (!raw.trim()) return { keys: [], rawEntries: [], source };
+function parseKeyEntries(raw: string): string[] {
+  if (!raw.trim()) return [];
 
   let entries: unknown[] | null = null;
   try {
     const parsed: unknown = JSON.parse(raw);
     if (Array.isArray(parsed)) entries = parsed;
-    else if (typeof parsed === "string") entries = parsed.split(/[,;\r\n]+/);
+    else if (typeof parsed === "string") entries = parsed.split(/[,;\\r\\n]+/);
     else if (parsed && typeof parsed === "object" && Array.isArray((parsed as { keys?: unknown }).keys)) {
       entries = (parsed as { keys: unknown[] }).keys;
     }
   } catch {
     // Plain text pools may be comma-, semicolon-, or newline-separated.
   }
-  if (!entries) entries = raw.split(/[,;\r\n]+/);
+  if (!entries) entries = raw.split(/[,;\\r\\n]+/);
 
-  const rawEntries = entries.filter((entry): entry is string => typeof entry === "string")
+  return entries
+    .filter((entry): entry is string => typeof entry === "string")
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function configuredKeys(): KeyPool {
+  const plural = Deno.env.get("OPENROUTER_API_KEYS") ?? "";
+  const singular = Deno.env.get("OPENROUTER_API_KEY") ?? "";
+
+  // Read both settings. A stale or malformed plural pool must not mask a valid
+  // singular key left from an earlier deployment/configuration.
+  const pluralEntries = parseKeyEntries(plural);
+  const singularEntries = parseKeyEntries(singular);
+  const rawEntries = [...pluralEntries, ...singularEntries];
+  const source: KeyPoolSource = pluralEntries.length && singularEntries.length
+    ? "both"
+    : pluralEntries.length
+    ? "OPENROUTER_API_KEYS"
+    : singularEntries.length
+    ? "OPENROUTER_API_KEY"
+    : "none";
+
   const keys = [...new Set(rawEntries.map(normalizeApiKey).filter(Boolean))];
   return { keys, rawEntries, source };
 }
