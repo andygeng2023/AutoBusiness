@@ -42,6 +42,17 @@ Puter.js is loaded in the browser and is used for private employee chat replies 
 
 The connector and automation settings are preferences, not integrations with external services. GitHub, Slack, Google Drive, and web-search actions are not wired up. Jobs are run when a user explicitly starts generation; there is no always-on background worker.
 
+
+## OpenRouter server-side proxy
+
+OpenRouter chat completions are sent through the authenticated `openrouter-proxy` Supabase Edge Function. Provider credentials are never stored in browser storage or included in the frontend bundle.
+
+Before using live OpenRouter generation, configure the Supabase Edge Function secret `OPENROUTER_API_KEYS` in the Supabase Dashboard. Its value can be a JSON array of keys (recommended), for example `["key-one","key-two"]`, or a comma-separated list. A single `OPENROUTER_API_KEY` secret is also accepted for a one-key setup. Do not commit real keys to this repository or paste them into chat.
+
+The proxy selects configured keys round-robin. When OpenRouter returns HTTP 429, that key is skipped for a four-hour cooldown within the running Edge Function instance and the next available key is tried. The proxy preserves upstream streaming responses and requires a valid signed-in Supabase user JWT. Cooldown state is in-memory and can reset when Supabase replaces an Edge Function instance; this is best-effort key rotation, not a durable cross-instance rate-limit ledger. Provider-wide/account-wide limits may still affect every key.
+
+Set `APP_ORIGINS` only if the app is hosted on additional origins; it accepts a comma-separated allow-list. The GitHub Pages origin and local Vite origins are allowed by default.
+
 ## Build and test
 
 - `npm run build` — TypeScript check and production build.
