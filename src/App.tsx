@@ -6,7 +6,7 @@ import {
   Search, Send, Settings2, ShieldCheck, Sparkles, Users, Workflow, Zap
 } from "lucide-react";
 import "./styles.css";
-import { supabase } from "./supabase";
+import { supabase, supabaseUrl, supabasePublishableKey } from "./supabase";
 
 
 function MarkdownPreview({ content }: { content: string }) {
@@ -134,11 +134,11 @@ const describeError = (error: unknown, fallback: string) => {
 const requestOpenRouter = async (model: string, messages: Array<{ role: string; content: string }>, onChunk?: (text: string) => void): Promise<string> => {
   const { data: { session }, error: sessionError } = await supabase.auth.getSession();
   if (sessionError || !session?.access_token) throw new Error("Sign in again to use the server-side OpenRouter connection.");
-  const response = await fetch(`${supabase.supabaseUrl}/functions/v1/openrouter-proxy`, {
+  const response = await fetch(`${supabaseUrl}/functions/v1/openrouter-proxy`, {
     method: "POST",
     headers: {
       "Authorization": "Bearer " + session.access_token,
-      "apikey": supabase.supabaseKey,
+      "apikey": supabasePublishableKey,
       "Content-Type": "application/json",
       "X-Title": "AutoBusiness"
     },
