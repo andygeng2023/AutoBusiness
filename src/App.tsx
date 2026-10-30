@@ -134,7 +134,7 @@ const describeError = (error: unknown, fallback: string) => {
 const requestOpenRouter = async (model: string, messages: Array<{ role: string; content: string }>, onChunk?: (text: string) => void): Promise<string> => {
   const { data: { session }, error: sessionError } = await supabase.auth.getSession();
   if (sessionError || !session?.access_token) throw new Error("Sign in again to use the server-side OpenRouter connection.");
-  const response = await fetch(`${supabase.supabaseUrl}/functions/v1/openrouter-proxy`, {
+  const response = await fetch(\`\${supabase.supabaseUrl}/functions/v1/openrouter-proxy\`, {
     method: "POST",
     headers: {
       "Authorization": "Bearer " + session.access_token,
@@ -146,7 +146,7 @@ const requestOpenRouter = async (model: string, messages: Array<{ role: string; 
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload?.error?.message || payload?.message || `OpenRouter proxy failed (${response.status})`);
+    throw new Error(payload?.error?.message || payload?.message || \`OpenRouter proxy failed (\${response.status})\`);
   }
   if (!response.body) throw new Error("Streaming is unavailable for this response.");
   const reader = response.body.getReader();
@@ -154,7 +154,7 @@ const requestOpenRouter = async (model: string, messages: Array<{ role: string; 
   let buffer = "";
   let result = "";
   const consumeFrame = (frame: string) => {
-    const data = frame.split("\\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\\n");
+    const data = frame.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
     if (!data || data === "[DONE]") return;
     try {
       const payload = JSON.parse(data);
@@ -166,12 +166,12 @@ const requestOpenRouter = async (model: string, messages: Array<{ role: string; 
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true }).replaceAll("\\r\\n", "\\n");
-    const frames = buffer.split("\\n\\n");
+    buffer += decoder.decode(value, { stream: true }).replaceAll("\r\n", "\n");
+    const frames = buffer.split("\n\n");
     buffer = frames.pop() ?? "";
     frames.forEach(consumeFrame);
   }
-  buffer += decoder.decode().replaceAll("\\r\\n", "\\n");
+  buffer += decoder.decode().replaceAll("\r\n", "\n");
   if (buffer.trim()) consumeFrame(buffer);
   return result;
 };
