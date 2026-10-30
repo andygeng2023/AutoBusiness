@@ -725,6 +725,25 @@ export default function App() {
       const addWorkNote = (employeeId: string, text: string) => {
         if (room) appendAgentMessages(room, [{ id: crypto.randomUUID(), from: employeeId, text, time: nowTime(), createdAt: new Date().toISOString(), jobId }]);
       };
+      const streamEmployeeOutput = async (employee: Employee, messages: Array<{ role: string; content: string }>, showInJob: boolean = false) => {
+        const draftKey = room ? room.id + ":" + employee.id : "";
+        let streamed = "";
+        if (draftKey) setLiveChatDrafts((old) => ({ ...old, [draftKey]: "" }));
+        try {
+          return (await requestOpenRouter(modelFor(employee), messages, openRouterKey, (chunk) => {
+            streamed += chunk;
+            if (draftKey) setLiveChatDrafts((old) => ({ ...old, [draftKey]: streamed }));
+            if (showInJob) setJobs((old) => old.map((item) => item.id === jobId ? { ...item, result: streamed } : item));
+          })).trim();
+        } finally {
+          if (draftKey) setLiveChatDrafts((old) => {
+            const next = { ...old };
+            delete next[draftKey];
+            return next;
+          });
+        }
+      };
+      setJobs((old) => old.map((item) => item.id === jobId ? { ...item, result: "" } : item));
       addWorkNote(emp.id, "Starting “" + job.title + "”. I’m breaking the brief into a deliverable, checking the acceptance criteria, and coordinating a supporting contribution before review.");
       const colleagues = employees.filter((candidate) => candidate.id !== emp.id && candidate.status !== "Paused");
       const contributor = colleagues.find((candidate) => candidate.id !== manager?.id && candidate.deptId === emp.deptId)
@@ -734,7 +753,7 @@ export default function App() {
         ?? colleagues.find((candidate) => candidate.id !== contributor?.id && candidate.status !== "Paused")
         ?? (contributor?.id !== emp.id ? contributor : undefined);
       const prompt = "You are " + emp.name + ", " + emp.role + " in " + department + " at " + company?.name + ". Your manager is " + (manager?.name ?? "the company owner") + ". Tone: " + emp.tone + ". Instructions: " + (emp.instructions || "Produce accurate, useful work and state assumptions.") + ".\n\nJOB: " + job.title + "\n\nDETAILS / ACCEPTANCE CRITERIA: " + (job.description || "No extra details supplied. Infer a sensible scope and state assumptions.") + "\n\nPREVIOUS REVIEW FEEDBACK: " + (feedbackOverride ?? job.reviewNote ?? "None.") + "\n\nProduce the actual deliverable, not a plan to do it. Use clear headings and concrete content. Address review feedback. Do not claim to have accessed external systems, files, or company data unless supplied in the prompt. State limitations explicitly. Include a short ## Work note with a 2–3 sentence summary of your approach and decisions; do not expose private hidden chain-of-thought.";
-      const draft = (await requestOpenRouter(modelFor(emp), [{ role: "user", content: prompt }], openRouterKey)).trim();
+      const draft = await streamEmployeeOutput(emp, [{ role: "user", content: prompt }], true);
       if (!draft) throw new Error("The AI provider returned an empty deliverable.");
       let output = draft;
       let reviewFeedback = "";
