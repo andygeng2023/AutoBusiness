@@ -801,6 +801,18 @@ export default function App() {
     if (demoMode || !user || !company || loadedCompanyId !== company.id || !settings.autoRun || !openRouterKey.trim() || !settings.connectors.includes("OpenRouter")) return;
     if (busy || autoRunJobLockRef.current || teamPulseLockRef.current) return;
 
+    const nextJob = jobs.filter((job) => job.status === "In progress").sort((a, b) =>
+      (Date.parse(a.created) || 0) - (Date.parse(b.created) || 0)
+    )[0];
+    if (nextJob) {
+      autoRunJobLockRef.current = true;
+      void runJob(nextJob.id, undefined, { background: true }).finally(() => {
+        autoRunJobLockRef.current = false;
+        setJobs((old) => old.slice());
+      });
+      return;
+    }
+
     const messageEvents = conversations.flatMap((conversation) => conversation.messages
       .filter((message) => message.from !== "system")
       .map((message) => ({
