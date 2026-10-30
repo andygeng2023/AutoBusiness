@@ -635,7 +635,7 @@ export default function App() {
         try {
           const model = freeModels.some((item) => item.id === emp.model) ? emp.model : freeModels[0]?.id ?? fallbackFreeModels[0].id;
           const groupInstruction = activeConversation.kind === "group"
-            ? "This is a group chat. Independently decide whether to reply, start a substantial assignment for yourself, or stay silent. Avoid acknowledgement-only replies and do not impersonate coworkers."
+            ? "This is a group chat. Independently decide whether to reply, start a substantial assignment for yourself, or stay silent. Because other members receive the same request, only open an assignment if you are clearly the most suitable owner and no existing assignment covers it. Avoid duplicate work, acknowledgement-only replies, and impersonating coworkers."
             : "This is a private chat. Decide whether to reply conversationally or open an assignment for yourself if the user has requested meaningful work.";
           const prompt = [
             { role: "system", content: "You are " + emp.name + ", " + emp.role + " in the " + company?.name + " workspace. Tone: " + emp.tone + ". Custom instructions: " + (emp.instructions || "Be accurate and useful.") + ". Current task: " + (emp.task || "none") + ".\\n" + groupInstruction + "\\nRespond in natural Markdown or plain text, never JSON. If you decide to take ownership of a substantial task, begin with [[START_JOB: concise title]] on its own line, then continue with a brief acknowledgement. If you have no useful contribution, return exactly [[NO_REPLY]]. Otherwise reply naturally. Decide independently; silence is acceptable. Never claim work is completed before producing it." },
@@ -918,6 +918,7 @@ export default function App() {
       return;
     }
     if (latestEvent.key === lastTeamPulseRef.current) return;
+    if (latestEvent.kind === "job") teamChainRef.current = 0;
 
     // Every meaningful reply can start the next decision. Stop after a bounded
     // chain even if models keep producing acknowledgements.
